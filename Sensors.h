@@ -8,12 +8,18 @@
 #include <BH1750.h>
 #include <RCSwitch.h>
 #include <Servo.h>
+#include <Adafruit_AHTX0.h>
+#include <Adafruit_SHT4x.h>
+#include <Adafruit_BMP280.h>
 
 OneWire oneWire(pinOW);
 DallasTemperature owSensorsBus(&oneWire);
 
 Adafruit_BMP085 bmp;
 Adafruit_BME280 bme;
+Adafruit_AHTX0 aht;
+Adafruit_SHT4x sht4 = Adafruit_SHT4x();
+Adafruit_BMP280 bmp280;
 BH1750 lightMeter;
 
 RCSwitch rfReceiver = RCSwitch();
@@ -139,6 +145,29 @@ void readSingleI2c(uint8_t idx) {
         i2cValues[idx].val3 = bme.readHumidity();
       }
       break;
+    case I2C_BMP280:
+      if (bmp280.begin(addr)) {
+        i2cValues[idx].val1 = bmp280.readTemperature();
+        i2cValues[idx].val2 = bmp280.readPressure() / 133.322;
+      }
+      break;
+    case I2C_AHT20:
+      if (aht.begin(&Wire, 0, addr)) {
+        sensors_event_t humidity, temp;
+        aht.getEvent(&humidity, &temp);
+        i2cValues[idx].val1 = temp.temperature;
+        i2cValues[idx].val2 = humidity.relative_humidity;
+      }
+      break;
+    case I2C_SHT41:
+      if (sht4.begin(&Wire)) {
+        sht4.setPrecision(SHT4X_HIGH_PRECISION);
+        sensors_event_t humidity, temp;
+        sht4.getEvent(&humidity, &temp);
+        i2cValues[idx].val1 = temp.temperature;
+        i2cValues[idx].val2 = humidity.relative_humidity;
+      }
+      break;
     case I2C_BH1750:
       if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, addr)) {
         i2cValues[idx].val1 = lightMeter.readLightLevel();
@@ -192,7 +221,12 @@ float getSensorParamByName(const char* name, RuleParam param, bool &valid) {
         strcasecmp(cfg.i2cDevices[i].fmt.name, name) == 0) {
       valid = true;
       if (param == PARAM_PRESS) return i2cValues[i].val2;
-      if (param == PARAM_HUM)   return i2cValues[i].val3;
+      if (param == PARAM_HUM) {
+        if (cfg.i2cDevices[i].type == I2C_AHT20 || cfg.i2cDevices[i].type == I2C_SHT41) {
+          return i2cValues[i].val2;
+        }
+        return i2cValues[i].val3;
+      }
       return i2cValues[i].val1; // Temp или Lux
     }
   }

@@ -62,6 +62,9 @@ enum I2cDevType : uint8_t {
   I2C_NONE = 0,
   I2C_BMP180_085,
   I2C_BME280,
+  I2C_BMP280,
+  I2C_AHT20,
+  I2C_SHT41,
   I2C_BH1750,
   I2C_PCF8574
 };

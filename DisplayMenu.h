@@ -84,20 +84,14 @@ String makeCellText(uint8_t kind, uint8_t idx) {
   String s = f.showName ? (String(f.name) + ": ") : "";
   if (!i2cValues[idx].online) return s + "OFFLINE";
   bool first = true;
-  if (d.type == I2C_BMP180_085 || d.type == I2C_BME280) {
-    if (f.showP1) {
-      s += formatValue(i2cValues[idx].val1, f, "\x07""C", true);
-      first = false;
-    }
-    if (f.showP2) {
-      if (!first) s += " ";
-      s += String((int)i2cValues[idx].val2) + (f.showUnit ? "mm" : "");
-      first = false;
-    }
-    if (d.type == I2C_BME280 && f.showP3) {
-      if (!first) s += " ";
-      s += String((int)i2cValues[idx].val3) + (f.showUnit ? "%" : "");
-    }
+
+  if (d.type == I2C_BMP180_085 || d.type == I2C_BME280 || d.type == I2C_BMP280) {
+    if (f.showP1) { s += formatValue(i2cValues[idx].val1, f, "\x07""C", true); first = false; }
+    if (f.showP2) { if (!first) s += " "; s += String((int)i2cValues[idx].val2) + (f.showUnit ? "mm" : ""); first = false; }
+    if (d.type == I2C_BME280 && f.showP3) { if (!first) s += " "; s += String((int)i2cValues[idx].val3) + (f.showUnit ? "%" : ""); }
+  } else if (d.type == I2C_AHT20 || d.type == I2C_SHT41) {
+    if (f.showP1) { s += formatValue(i2cValues[idx].val1, f, "\x07""C", true); first = false; }
+    if (f.showP2) { if (!first) s += " "; s += formatValue(i2cValues[idx].val2, f, "%", false); }
   } else if (d.type == I2C_BH1750 && f.showP1) {
     s += formatValue(i2cValues[idx].val1, f, "lx", false);
   } else if (d.type == I2C_PCF8574 && f.showP1) {
@@ -594,8 +588,11 @@ void menuI2C() {
         if (Wire.endTransmission() == 0) {
           I2cDevType det = I2C_NONE;
           if (addr == 0x23 || addr == 0x5C) det = I2C_BH1750;
-          else if (addr == 0x76 || addr == 0x77) det = I2C_BME280;
-          else if ((addr >= 0x20 && addr <= 0x27) || (addr >= 0x38 && addr <= 0x3F)) det = I2C_PCF8574;
+          else if (addr == 0x38) det = I2C_AHT20;
+          else if (addr == 0x44 || addr == 0x45) det = I2C_SHT41;
+          else if (addr == 0x76 || addr == 0x77) det = I2C_BMP280;
+          else if ((addr >= 0x20 && addr <= 0x27) || (addr >= 0x39 && addr <= 0x3F)) det = I2C_PCF8574;
+
           int slot = -1;
           for (int i = 0; i < MAX_I2C_DEVICES; i++) if (cfg.i2cDevices[i].addr == addr) slot = i;
           if (slot == -1) {
@@ -611,7 +608,7 @@ void menuI2C() {
         }
       }
       saveConfig();
-      const char* ok[1] = {"< Back"};
+      const char* ok[] = {"< Back"};
       lcd.selectVal("Found I2C: " + String(found), ok, 1, false, 0);
     } else if (pos == 1) {
       uint8_t dPos = 0;
@@ -626,7 +623,7 @@ void menuI2C() {
         if (cfg.i2cDevices[dPos].addr != 0) {
           uint8_t cardPos = 0;
           while (true) {
-            const char* tNames[5] = {"None", "BMP180", "BME280", "BH1750", "PCF8574"};
+            const char* tNames[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574"};
             String cItems[4];
             uint8_t cn = 0;
             cItems[cn++] = "Type: " + String(tNames[cfg.i2cDevices[dPos].type]);
@@ -638,15 +635,13 @@ void menuI2C() {
             int fmtIdx = cn;
             cItems[cn++] = "Display Format >";
             cItems[cn++] = "< Back";
+
             cardPos = lcd.selectVal(cfg.i2cDevices[dPos].fmt.name, cItems, cn, false, cardPos);
             if (cardPos == cn - 1) break;
             if (cardPos == 0) {
-              const char* types[6] = {"None", "BMP180", "BME280", "BH1750", "PCF8574", "< Back"};
-              uint8_t t = lcd.selectVal("Device Type", types, 6, false, (uint8_t)cfg.i2cDevices[dPos].type);
-              if (t < 5) {
-                cfg.i2cDevices[dPos].type = (I2cDevType)t;
-                saveConfig();
-              }
+              const char* types[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574", "< Back"};
+              uint8_t t = lcd.selectVal("Device Type", types, 9, false, (uint8_t)cfg.i2cDevices[dPos].type);
+              if (t < 8) { cfg.i2cDevices[dPos].type = (I2cDevType)t; saveConfig(); }
             } else if (cardPos == pcfIdx) {
               menuPcfPins(dPos);
             } else if (cardPos == fmtIdx) {
