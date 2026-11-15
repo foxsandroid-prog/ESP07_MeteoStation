@@ -177,9 +177,13 @@ void drawMainScreen() {
   String autoLines[MAX_OW_SENSORS + MAX_DHT_SENSORS + MAX_I2C_DEVICES + 2];
   uint8_t totalAuto = 0;
 
+  String wifiBadge = "W:OF";
+  if (cfg.net.wifiMode == 2) wifiBadge = "W:AP";
+  else if (cfg.net.wifiMode == 1) wifiBadge = (WiFi.status() == WL_CONNECTED) ? "W:OK" : "W:..";
+
   String sysLine = getFormattedTime().substring(0, 5) + " " +
                    String(batteryVoltage, 1) + "V " +
-                   (externalPower24V ? "AC" : "BAT");
+                   (externalPower24V ? "AC " : "BT ") + wifiBadge;
   autoLines[totalAuto++] = sysLine;
 
   for (uint8_t pass = 0; pass < 2; pass++) {
@@ -318,6 +322,7 @@ void menuNetwork() {
     applyNetworkSettings();
   }
 }
+
 // ================= НАСТРОЙКА ФОРМАТА ДАТЧИКА =================
 void editDisplayFormat(DisplayFormat &fmt, uint8_t pCount,
                        const char *p1Name, const char *p2Name, const char *p3Name) {
@@ -356,6 +361,7 @@ void editDisplayFormat(DisplayFormat &fmt, uint8_t pCount,
     saveConfig();
   }
 }
+
 // ================= ПОБИТОВОЕ УПРАВЛЕНИЕ PCF8574 =================
 void menuPcfPins(uint8_t devIdx) {
   uint8_t chPos = 0;
@@ -365,58 +371,87 @@ void menuPcfPins(uint8_t devIdx) {
     readSingleI2c(devIdx);
     cfg.i2cDevices[devIdx].fmt.enabled = prevEn;
     uint8_t curState = (uint8_t)i2cValues[devIdx].val1;
-    String pinItems[9];
+
+    constexpr uint8_t PIN_ITEMS_CNT = 9;
+    String pinItems[PIN_ITEMS_CNT];
     for (int b = 0; b < 8; b++) {
       bool isOut = (cfg.i2cDevices[devIdx].pcfDirMask >> b) & 1;
       String nm = String(cfg.i2cDevices[devIdx].pcfPinNames[b]);
       if (isOut) {
         bool isOn = (cfg.i2cDevices[devIdx].pcfOutMask >> b) & 1;
-        pinItems[b] = "P" + String(b) + " [" + nm + "]: " + (isOn ? "ON" : "OFF");
+        bool isInv = (cfg.i2cDevices[devIdx].pcfInvMask >> b) & 1;
+        pinItems[b] = "P" + String(b) + "[" + nm + "]:" + (isOn ? "ON" : "OFF") + (isInv ? "(I)" : "");
       } else {
         bool inState = (curState >> b) & 1;
-        pinItems[b] = "P" + String(b) + " [" + nm + "]: IN=" + (inState ? "1" : "0");
+        pinItems[b] = "P" + String(b) + "[" + nm + "]:IN=" + (inState ? "1" : "0");
       }
     }
     pinItems[8] = "< Back";
-    chPos = lcd.selectVal("PCF8574 Channels", pinItems, 9, false, chPos);
+
+    chPos = lcd.selectVal("PCF8574 Channels", pinItems, PIN_ITEMS_CNT, false, chPos);
     if (chPos == 8) break;
+
     uint8_t b = chPos;
     bool isOut = (cfg.i2cDevices[devIdx].pcfDirMask >> b) & 1;
     uint8_t actPos = 0;
+
     while (true) {
-      String pinActs[4];
+      constexpr uint8_t MAX_ACT = 5;
+      String pinActs[MAX_ACT];
       uint8_t n = 0;
+      int stateIdx = -1, invIdx = -1;
+
       if (isOut) {
         bool isOn = (cfg.i2cDevices[devIdx].pcfOutMask >> b) & 1;
+        stateIdx = n;
         pinActs[n++] = String("State: ") + (isOn ? "ON (1)" : "OFF (0)");
       } else {
         bool inState = (curState >> b) & 1;
         pinActs[n++] = String("Input: ") + (inState ? "HIGH" : "LOW");
       }
+
+      int dirIdx = n;
       pinActs[n++] = String("Dir: ") + (isOut ? "OUT" : "IN");
+
+      if (isOut) {
+        bool isInv = (cfg.i2cDevices[devIdx].pcfInvMask >> b) & 1;
+        invIdx = n;
+        pinActs[n++] = String("Invert: ") + (isInv ? "YES (LOW)" : "NO (HIGH)");
+      }
+
+      int renIdx = n;
       pinActs[n++] = "Rename Channel";
       pinActs[n++] = "< Back";
+
       actPos = lcd.selectVal("P" + String(b) + " " + String(cfg.i2cDevices[devIdx].pcfPinNames[b]), pinActs, n, false, actPos);
       if (actPos == n - 1) break;
-      if (actPos == 0 && isOut) {
+
+      if (actPos == stateIdx) {
         bool newState = editBoolSetting("P" + String(b) + " Relay", (cfg.i2cDevices[devIdx].pcfOutMask >> b) & 1, "OFF (0)", "ON (1)");
         if (newState) cfg.i2cDevices[devIdx].pcfOutMask |= (1 << b);
         else cfg.i2cDevices[devIdx].pcfOutMask &= ~(1 << b);
         applyPcfOutputs(devIdx);
         saveConfig();
-      } else if (actPos == 1) {
+      } else if (actPos == dirIdx) {
         if (isOut) cfg.i2cDevices[devIdx].pcfDirMask &= ~(1 << b);
         else cfg.i2cDevices[devIdx].pcfDirMask |= (1 << b);
         applyPcfOutputs(devIdx);
         saveConfig();
         break;
-      } else if (actPos == 2) {
+      } else if (actPos == invIdx) {
+        bool newInv = editBoolSetting("Invert P" + String(b), (cfg.i2cDevices[devIdx].pcfInvMask >> b) & 1, "NO (Direct)", "YES (Active LOW)");
+        if (newInv) cfg.i2cDevices[devIdx].pcfInvMask |= (1 << b);
+        else cfg.i2cDevices[devIdx].pcfInvMask &= ~(1 << b);
+        applyPcfOutputs(devIdx);
+        saveConfig();
+      } else if (actPos == renIdx) {
         lcd.inputStrVal("Pin Name:", cfg.i2cDevices[devIdx].pcfPinNames[b], 6, NAME_CHARS);
         saveConfig();
       }
     }
   }
 }
+
 // ================= КОНСТРУКТОР ПРАВИЛ АВТОМАТИЗАЦИИ =================
 void editSingleRule(uint8_t rIdx) {
   AutoRule &r = cfg.rules[rIdx];
@@ -465,6 +500,7 @@ void editSingleRule(uint8_t rIdx) {
     saveConfig();
   }
 }
+
 void menuRules() {
   uint8_t pos = 0;
   const char* opSym[5] = {">", "<", ">=", "<=", "=="};
@@ -485,6 +521,7 @@ void menuRules() {
     editSingleRule(pos);
   }
 }
+
 // ================= МЕНЮ 1-WIRE, I2C И СИСТЕМЫ =================
 void menuOneWire() {
   uint8_t pos = 0;
@@ -541,6 +578,7 @@ void menuOneWire() {
     }
   }
 }
+
 void menuI2C() {
   uint8_t pos = 0;
   const char* items[] = {"1. Scan I2C Bus", "2. Device Settings", "< Back"};
@@ -620,6 +658,7 @@ void menuI2C() {
     }
   }
 }
+
 void menuSystem() {
   uint8_t pos = 0;
   while (true) {
@@ -663,6 +702,7 @@ void menuSystem() {
     saveConfig();
   }
 }
+
 void openMainMenu() {
   pollPhase = POLL_IDLE;
   uint8_t pos = 0;

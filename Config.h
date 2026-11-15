@@ -71,6 +71,7 @@ struct I2cDeviceCfg {
   I2cDevType type;
   uint8_t pcfOutMask;
   uint8_t pcfDirMask;
+  uint8_t pcfInvMask; // Маска инверсии выходов (для реле HL-52S с управлением LOW)
   char pcfPinNames[8][7];
   DisplayFormat fmt;
 };
@@ -162,7 +163,7 @@ void setDefaultConfig() {
   cfg.backlightTimeout = 30;
   cfg.pollIntervalSec = 5;
   cfg.servoAngle = 90;
-  cfg.powerSensePcfIdx = 255;
+  cfg.powerSensePcfIdx = 0;
   cfg.powerSensePcfBit = 7;
 
   // Сеть по умолчанию: Точка доступа
@@ -214,7 +215,9 @@ void setDefaultConfig() {
     cfg.i2cDevices[i].fmt.showP1 = true;
     cfg.i2cDevices[i].fmt.showP2 = true;
     cfg.i2cDevices[i].fmt.showP3 = true;
-    cfg.i2cDevices[i].pcfDirMask = 0xFF;
+    cfg.i2cDevices[i].pcfDirMask = 0x7F; // P0..P6 = выходы (0..6), P7 = вход (7)
+    cfg.i2cDevices[i].pcfInvMask = 0x00; // По умолчанию без инверсии (можно включить в меню/Web)
+
     for (int p = 0; p < 8; p++) {
       snprintf(cfg.i2cDevices[i].pcfPinNames[p], 7, "PIN_%d", p);
     }
@@ -257,9 +260,12 @@ uint8_t pcfPortByte(uint8_t idx) {
   uint8_t outByte = 0;
   for (uint8_t b = 0; b < 8; b++) {
     if ((cfg.i2cDevices[idx].pcfDirMask >> b) & 1) {
-      if ((cfg.i2cDevices[idx].pcfOutMask >> b) & 1) outByte |= (1 << b);
+      bool logicalOn = (cfg.i2cDevices[idx].pcfOutMask >> b) & 1;
+      bool inverted  = (cfg.i2cDevices[idx].pcfInvMask >> b) & 1;
+      bool physHigh  = inverted ? !logicalOn : logicalOn;
+      if (physHigh) outByte |= (1 << b);
     } else {
-      outByte |= (1 << b);
+      outByte |= (1 << b); // Для режима входа PCF8574 требует записать 1 (подтяжка)
     }
   }
   return outByte;
