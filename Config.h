@@ -15,11 +15,12 @@
 // Пины ESP-07
 #define pinSDA   4
 #define pinSCL   5
-#define pinCLK   2   // Энкодер A (подтяжка 10к к +3.3В)
-#define pinDT    15  // Энкодер B (подтяжка 10к к GND, общий энкодера C на +3.3В)
+#define pinCLK   12  // CLK энкодера на GPIO12 (подтяжка 10 кОм к GND) (был на 2 с неподходящей поддяжкой)
+#define pinDT    15  // DT энкодера на GPIO15 (подтяжка 10 кОм к GND),
+// общий контакт энкодера C на +3.3В, проверить не замкнуты ли два GND на энкодере, если это модуль - то резать дорожку
 #define pinSW    0   // Кнопка энкодера (подтяжка 10к к +3.3В, замыкает на GND)
 #define pinOW    14  // 1-Wire (DS18B20)
-#define pinDHT   12  // Single-Wire (DHT22)
+#define pinDHT   2   // Single-Wire (DHT22), из-за энкодера перенесён на GPIO2 (подтяжка 4.7 кОм к +3.3 В) (был на 12)
 #define pinRF    13  // Приемник SRX887
 #define pinServo 16  // Сервопривод
 #define pinADC   A0  // Контроль АКБ 18650
