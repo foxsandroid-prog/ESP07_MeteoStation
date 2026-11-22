@@ -10,7 +10,28 @@ unsigned long lastActivityTime = 0;
 bool isBacklightOn = true;
 int mainScrollOffset = 0;
 
-uint8_t degreeChar[8] = {0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00};
+uint8_t degreeChar[8] = {0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00}; // Символ градуса
+// Иконки 5x8 для LCD2004 (слоты CGRAM: 0 = питание, 1 = Wi-Fi)
+uint8_t iconPlugChar[8]  = {0x0A, 0x0A, 0x1F, 0x1F, 0x0E, 0x04, 0x04, 0x00}; // Вилка / сеть 24В
+uint8_t iconBattChar[8]  = {0x0E, 0x1F, 0x11, 0x1F, 0x1F, 0x1F, 0x1F, 0x00}; // Батарея (АКБ)
+uint8_t iconApChar[8]    = {0x15, 0x15, 0x0E, 0x04, 0x04, 0x04, 0x04, 0x00}; // Антенна (режим AP)
+uint8_t iconWifiOff[8]   = {0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x00, 0x00}; // Крестик (Wi-Fi OFF / нет связи)
+uint8_t iconSig1[8]      = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x10}; // 1 палочка (слабый сигнал)
+uint8_t iconSig2[8]      = {0x00, 0x00, 0x00, 0x00, 0x08, 0x08, 0x18, 0x18}; // 2 палочки
+uint8_t iconSig3[8]      = {0x00, 0x00, 0x04, 0x04, 0x0C, 0x0C, 0x1C, 0x1C}; // 3 палочки
+uint8_t iconSig4[8]      = {0x02, 0x02, 0x06, 0x06, 0x0E, 0x0E, 0x1E, 0x1E}; // 4 палочки (отличный сигнал)
+
+String formatUptimeShort() {
+  unsigned long sec = millis() / 1000UL;
+  unsigned long days = sec / 86400UL;
+  unsigned long hrs  = (sec % 86400UL) / 3600UL;
+  unsigned long mins = (sec % 3600UL) / 60UL;
+  char buf[12];
+  if (days > 0) snprintf(buf, sizeof(buf), "%lud%02luh", days, hrs);
+  else snprintf(buf, sizeof(buf), "%02lu:%02lu", hrs, mins);
+  return String(buf);
+}
+
 
 const char* NET_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.";
 const char* NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_ ";
@@ -171,13 +192,29 @@ void drawMainScreen() {
   String autoLines[MAX_OW_SENSORS + MAX_DHT_SENSORS + MAX_I2C_DEVICES + 2];
   uint8_t totalAuto = 0;
 
-  String wifiBadge = "W:OF";
-  if (cfg.net.wifiMode == 2) wifiBadge = "W:AP";
-  else if (cfg.net.wifiMode == 1) wifiBadge = (WiFi.status() == WL_CONNECTED) ? "W:OK" : "W:..";
+  // Слот 1 (\x01): иконка питания (вилка или батарейка)
+  lcd.createChar(1, externalPower24V ? iconPlugChar : iconBattChar);
 
-  String sysLine = getFormattedTime().substring(0, 5) + " " +
-                   String(batteryVoltage, 1) + "V " +
-                   (externalPower24V ? "AC " : "BT ") + wifiBadge;
+  // Слот 2 (\x02): иконка Wi-Fi (антенна AP, уровень сигнала STA или крестик)
+  if (cfg.net.wifiMode == 2) {
+    lcd.createChar(2, iconApChar);
+  } else if (cfg.net.wifiMode == 1 && WiFi.status() == WL_CONNECTED) {
+    long rssi = WiFi.RSSI();
+    if (rssi >= -60)      lcd.createChar(2, iconSig4);
+    else if (rssi >= -70) lcd.createChar(2, iconSig3);
+    else if (rssi >= -80) lcd.createChar(2, iconSig2);
+    else                  lcd.createChar(2, iconSig1);
+  } else {
+    lcd.createChar(2, iconWifiOff);
+  }
+
+  // Формируем верхнюю строку ровно на 20 символов: "12:34 U:02:15 4.1V⚡📶"
+  String leftPart = getFormattedTime().substring(0, 5) + " U:" + formatUptimeShort();
+  String rightPart = String(batteryVoltage, 1) + "V\x01\x02";
+  int spaces = (int)LCD_COLS - (int)leftPart.length() - (int)rightPart.length();
+  String sysLine = leftPart;
+  for (int s = 0; s < max(1, spaces); s++) sysLine += " ";
+  sysLine += rightPart;
   autoLines[totalAuto++] = sysLine;
 
   for (uint8_t pass = 0; pass < 2; pass++) {
@@ -261,15 +298,15 @@ void menuNetwork() {
 
     String items[11] = {
       "Mode: " + String(modeNames[cfg.net.wifiMode]),
-      "SSID: " + String(cfg.net.ssid),
-      "Pass: " + String(cfg.net.password),
-      "Status: " + statusStr,
-      "Cur IP: " + ipStr,
+      "SSID>" + String(cfg.net.ssid),
+      "Pass>" + String(cfg.net.password),
+      "Stat>" + statusStr,
+      "IP>" + ipStr,
       "IP Mode: " + String(cfg.net.useStaticIp ? "Static" : "DHCP"),
       "Static IP >",
       "Gateway & Mask >",
-      "Timezone: UTC" + (cfg.net.timezone >= 0 ? "+" + String(cfg.net.timezone) : String(cfg.net.timezone)),
-      "Web Pass: " + String(cfg.net.webPass),
+      "TZ: UTC" + (cfg.net.timezone >= 0 ? "+" + String(cfg.net.timezone) : String(cfg.net.timezone)),
+      "WPas>" + String(cfg.net.webPass),
       "< Back"
     };
 
@@ -291,6 +328,12 @@ void menuNetwork() {
       lcd.inputStrVal("Wi-Fi Password:", cfg.net.password, 16, NET_CHARS);
       trimTrailingSpaces(cfg.net.password, sizeof(cfg.net.password));
       netChanged = true;
+    } else if (pos == 3) {
+      const char* ok[1] = {"< Back"};
+      lcd.selectVal(statusStr, ok, 1, false, 0);
+    } else if (pos == 4) {
+      const char* ok[1] = {"< Back"};
+      lcd.selectVal(ipStr, ok, 1, false, 0);
     } else if (pos == 5) {
       bool st = editBoolSetting("IP Configuration", cfg.net.useStaticIp, "DHCP (Auto)", "Static IP");
       if (st != cfg.net.useStaticIp) {

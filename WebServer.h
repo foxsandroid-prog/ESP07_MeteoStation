@@ -110,8 +110,19 @@ void handleApiAll() {
       ("STA (" + WiFi.localIP().toString() + ")") : "STA (Поиск...)";
   }
   json += "\"wifi\":\"" + wStr + "\",";
+
+  long rssi = (cfg.net.wifiMode == 1 && WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+  unsigned long sec = millis() / 1000UL;
+  char upBuf[24];
+  snprintf(upBuf, sizeof(upBuf), "%luд %02lu:%02lu:%02lu",
+           sec / 86400UL, (sec % 86400UL) / 3600UL, (sec % 3600UL) / 60UL, sec % 60UL);
+
+  json += "\"rssi\":" + String(rssi) + ",";
+  json += "\"wmode\":" + String(cfg.net.wifiMode) + ",";
+  json += "\"uptime\":\"" + String(upBuf) + "\",";
   json += "\"bat\":" + String(batteryVoltage, 2) + ",";
   json += "\"pwr24\":" + String(externalPower24V ? 1 : 0) + ",";
+
   json += "\"rf\":" + String(lastRfCode) + ",";
   json += "\"servo\":" + String(cfg.servoAngle) + ",\"sensors\":[";
 
@@ -192,7 +203,9 @@ button.rl{margin:4px;padding:10px 14px;color:#fff;border:none;border-radius:4px;
 <script>
 function tog(d,p){fetch('/api/relay?dev='+d+'&pin='+p).then(()=>upd());}
 function upd(){fetch('/api/all').then(r=>r.json()).then(d=>{
-document.getElementById('sys').innerHTML='Время: <b>'+d.time+'</b> | Wi-Fi: <b>'+d.wifi+'</b><br>АКБ: <b>'+d.bat+'V</b> | 24V: <b>'+(d.pwr24?'ОК':'НЕТ')+'</b> | RF: <b>'+d.rf+'</b>';
+let wIcon = d.wmode==2 ? '📡 AP' : (d.rssi!=0 ? ('📶 '+(d.rssi>=-60?'4/4':d.rssi>=-70?'3/4':d.rssi>=-80?'2/4':'1/4')+' ('+d.rssi+' dBm)') : '❌ Нет связи');
+let pIcon = d.pwr24 ? '🔌 Сеть (24V)' : '🔋 АКБ ('+d.bat+'V)';
+document.getElementById('sys').innerHTML='Время: <b>'+d.time+'</b> | Uptime: <b>'+d.uptime+'</b><br>Wi-Fi: <b>'+d.wifi+'</b> ['+wIcon+']<br>Питание: <b>'+pIcon+'</b> | АКБ: <b>'+d.bat+'V</b> | RF: <b>'+d.rf+'</b>';
 let h='';d.sensors.forEach(s=>{h+='<tr><td>'+s.name+'</td><td><b>'+s.val+'</b></td><td><a style="color:#64b5f6" href="/api/sensor?name='+s.name+'">GET</a></td></tr>';});
 document.getElementById('tb').innerHTML=h;
 let rh='';if(d.relays.length){rh+='<h3>Реле (PCF8574)</h3>';d.relays.forEach(r=>{
@@ -307,7 +320,9 @@ void handleSettings() {
     }
   }
 
-  html += "<button type='submit'>Сохранить и применить</button></form><br><a style='color:#64b5f6' href='/'>На главную</a></body></html>";
+  html += "<button type='submit'>Сохранить и применить</button></form><br>";
+  html += "<a style='color:#64b5f6' href='/'>На главную</a></body></html>";
+
   server.send(200, "text/html", html);
 }
 

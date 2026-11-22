@@ -34,6 +34,13 @@ void setup() {
   Serial.println();
   Serial.print("Reset reason: ");
   Serial.println(ESP.getResetReason());
+
+  Serial.print("Real Flash Size: ");
+  Serial.println(ESP.getFlashChipRealSize());
+  Serial.print("IDE Flash Size: ");
+  Serial.println(ESP.getFlashChipSize());
+  Serial.print("Config bytes: ");
+  Serial.println(sizeof(SystemConfig));
   
   // Явно задаём пины I2C для ESP-07 (SDA = GPIO4, SCL = GPIO5)
   Wire.begin(pinSDA, pinSCL);

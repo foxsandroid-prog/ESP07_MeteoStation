@@ -17,7 +17,6 @@
 #define pinSCL   5
 #define pinCLK   12  // CLK энкодера на GPIO12 (подтяжка 10 кОм к GND) (был на GPIO2 с неподходящей поддяжкой)
 #define pinDT    13  // DT энкодера на GPIO15 (подтяжка 10 кОм к GND),
-// общий контакт энкодера C на +3.3В, проверить не замкнуты ли два GND на энкодере, если это модуль - то резать дорожку
 // меняю на 13 пин и подтяжку к 3.3В и общий к gnd
 #define pinSW    0   // Кнопка энкодера (подтяжка 10к к +3.3В, замыкает на GND)
 #define pinOW    14  // 1-Wire (DS18B20)
@@ -249,7 +248,8 @@ bool saveConfig() {
 }
 
 void loadConfig() {
-  EEPROM.begin(sizeof(SystemConfig) + 64);
+//  EEPROM.begin(sizeof(SystemConfig) + 64);
+  EEPROM.begin(2048);
   EEPROM.get(0, cfg);
   if (cfg.magic != EEPROM_MAGIC) {
     setDefaultConfig();
