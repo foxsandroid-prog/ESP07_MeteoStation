@@ -29,6 +29,12 @@ bool checkMainScreenButtonClick() {
 }
 
 void setup() {
+  Serial.begin(115200);
+  delay(100);
+  Serial.println();
+  Serial.print("Reset reason: ");
+  Serial.println(ESP.getResetReason());
+  
   // Явно задаём пины I2C для ESP-07 (SDA = GPIO4, SCL = GPIO5)
   Wire.begin(pinSDA, pinSCL);
   loadConfig();
@@ -46,6 +52,10 @@ void setup() {
   lcd.home();
   lcd.clear();
   lcd.attachEncoder(pinCLK, pinDT, pinSW);
+  lcd.attachIdleFunc([]() {
+    server.handleClient();
+    yield();
+  });
 
   updateBacklight();
   registerUserActivity();
