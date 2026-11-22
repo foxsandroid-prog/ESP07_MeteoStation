@@ -237,6 +237,14 @@ void editIpAddress(const String &title, uint8_t ipArr[4]) {
   }
 }
 
+void trimTrailingSpaces(char *str, size_t maxLen) {
+  str[maxLen - 1] = '\0';
+  int len = strlen(str);
+  while (len > 0 && str[len - 1] == ' ') {
+    str[--len] = '\0';
+  }
+}
+
 // ================= МЕНЮ СЕТЕВЫХ НАСТРОЕК (WI-FI / IP / WEB) =================
 void menuNetwork() {
   uint8_t pos = 0;
@@ -277,9 +285,11 @@ void menuNetwork() {
       }
     } else if (pos == 1) {
       lcd.inputStrVal("Wi-Fi SSID:", cfg.net.ssid, 16, NET_CHARS);
+      trimTrailingSpaces(cfg.net.ssid, sizeof(cfg.net.ssid));
       netChanged = true;
     } else if (pos == 2) {
       lcd.inputStrVal("Wi-Fi Password:", cfg.net.password, 16, NET_CHARS);
+      trimTrailingSpaces(cfg.net.password, sizeof(cfg.net.password));
       netChanged = true;
     } else if (pos == 5) {
       bool st = editBoolSetting("IP Configuration", cfg.net.useStaticIp, "DHCP (Auto)", "Static IP");
@@ -306,6 +316,7 @@ void menuNetwork() {
       configTime((long)cfg.net.timezone * 3600L, 0, "pool.ntp.org", "time.nist.gov");
     } else if (pos == 9) {
       lcd.inputStrVal("Web Password:", cfg.net.webPass, 16, NET_CHARS);
+      trimTrailingSpaces(cfg.net.webPass, sizeof(cfg.net.webPass));
     }
     saveConfig();
   }
@@ -525,30 +536,37 @@ void menuOneWire() {
     if (pos == 2) break;
     if (pos == 0) {
       lcd.clear(); lcd.setCursor(0, 1); lcd.print("Scanning 1-Wire...");
-      owSensorsBus.requestTemperatures();
+      owSensorsBus.begin();
+      delay(20);
       uint8_t addr[8], found = 0;
-      oneWire.reset_search();
-      while (oneWire.search(addr)) {
-        if (OneWire::crc8(addr, 7) != addr[7]) continue;
-        int slot = -1;
-        for (int i = 0; i < MAX_OW_SENSORS; i++) {
-          if (memcmp(cfg.owSensors[i].addr, addr, 8) == 0) {
-            slot = i;
-            break;
-          }
-        }
-        if (slot == -1) {
+      for (uint8_t attempt = 0; attempt < 3 && found == 0; attempt++) {
+        oneWire.reset_search();
+        delay(10);
+        while (oneWire.search(addr)) {
+          yield();
+          if (OneWire::crc8(addr, 7) != addr[7]) continue;
+          int slot = -1;
           for (int i = 0; i < MAX_OW_SENSORS; i++) {
-            if (cfg.owSensors[i].addr[0] == 0) {
-              slot = i; memcpy(cfg.owSensors[i].addr, addr, 8);
-              cfg.owSensors[i].fmt.enabled = true; cfg.owSensors[i].fmt.showOnMain = true;
+            if (memcmp(cfg.owSensors[i].addr, addr, 8) == 0) {
+              slot = i;
               break;
             }
           }
-        }
-        if (slot != -1) {
-          owValues[slot] = owSensorsBus.getTempC(addr);
-          found++;
+          if (slot == -1) {
+            for (int i = 0; i < MAX_OW_SENSORS; i++) {
+              if (cfg.owSensors[i].addr[0] == 0) {
+                slot = i; memcpy(cfg.owSensors[i].addr, addr, 8);
+                cfg.owSensors[i].fmt.enabled = true; cfg.owSensors[i].fmt.showOnMain = true;
+                break;
+              }
+            }
+          }
+          if (slot != -1) {
+            owSensorsBus.requestTemperaturesByAddress(addr);
+            delay(750);
+            owValues[slot] = owSensorsBus.getTempC(addr);
+            found++;
+          }
         }
       }
       saveConfig();

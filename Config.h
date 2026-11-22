@@ -30,7 +30,7 @@
 #define MAX_DHT_SENSORS 2
 #define MAX_I2C_DEVICES 8
 #define MAX_RULES 8
-#define EEPROM_MAGIC    0xEB
+#define EEPROM_MAGIC    0x0F
 
 // ================= СТРУКТУРЫ НАСТРОЕК =================
 struct DisplayFormat {
@@ -240,9 +240,12 @@ void setDefaultConfig() {
   }
 }
 
-void saveConfig() {
+bool saveConfig() {
+  cfg.magic = EEPROM_MAGIC;
   EEPROM.put(0, cfg);
-  EEPROM.commit();
+  bool ok = EEPROM.commit();
+  delay(50);
+  return ok;
 }
 
 void loadConfig() {
