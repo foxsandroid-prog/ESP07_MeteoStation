@@ -209,14 +209,18 @@ void drawMainScreen() {
   }
 
   // Формируем верхнюю строку ровно на 20 символов: "12:34 U:02:15 4.1V⚡📶"
+  // 1. Всегда формируем и закрепляем строку 0 (верхняя системная строка)
   String leftPart = getFormattedTime().substring(0, 5) + " U:" + formatUptimeShort();
   String rightPart = String(batteryVoltage, 1) + "V\x01\x02";
   int spaces = (int)LCD_COLS - (int)leftPart.length() - (int)rightPart.length();
   String sysLine = leftPart;
   for (int s = 0; s < max(1, spaces); s++) sysLine += " ";
   sysLine += rightPart;
-  autoLines[totalAuto++] = sysLine;
+  while (sysLine.length() < (unsigned)LCD_COLS) sysLine += " ";
+  rowText[0] = sysLine;
+  rowFixed[0] = true; // Жёстко фиксируем строку 0, чтобы прокрутка её не трогала
 
+  // 2. Собираем датчики с фиксированными координатами (только в строки 1..3) и авто-список
   for (uint8_t pass = 0; pass < 2; pass++) {
     for (uint8_t k = 0; k < 3; k++) {
       int count = (k == 0) ? MAX_OW_SENSORS : (k == 1) ? MAX_DHT_SENSORS : MAX_I2C_DEVICES;
@@ -226,7 +230,8 @@ void drawMainScreen() {
         if (!f->enabled || !f->showOnMain) continue;
 
         if (pass == 0) {
-          if (f->row < 0 || f->row >= LCD_ROWS) continue;
+          // Фиксированные датчики разрешаем только в строках 1..3, чтобы не затирать строку 0
+          if (f->row < 1 || f->row >= LCD_ROWS) continue;
           placeFixedText(rowText, rowNext, rowFixed, makeCellText(k, i), f->row, f->col);
         } else {
           if (f->row != -1) continue;
@@ -236,16 +241,29 @@ void drawMainScreen() {
     }
   }
 
-  if (mainScrollOffset >= totalAuto) mainScrollOffset = 0;
-  if (mainScrollOffset < 0) mainScrollOffset = max(0, (int)totalAuto - 1);
+  // 3. Считаем сколько свободных строк осталось ниже 0-й (обычно 3 строки: 1, 2, 3)
+  int freeRows = 0;
+  for (uint8_t r = 1; r < LCD_ROWS; r++) {
+    if (!rowFixed[r]) freeRows++;
+  }
 
+  // Ограничиваем прокрутку, чтобы не уезжать в пустоту
+  int maxOffset = max(0, (int)totalAuto - freeRows);
+  if (mainScrollOffset > maxOffset) mainScrollOffset = 0;
+  if (mainScrollOffset < 0) mainScrollOffset = maxOffset;
+
+  // 4. Заполняем авто-списком только строки 1..3
   int autoIdx = mainScrollOffset;
-  for (uint8_t r = 0; r < LCD_ROWS; r++) {
+  for (uint8_t r = 1; r < LCD_ROWS; r++) {
     if (!rowFixed[r] && autoIdx < (int)totalAuto) {
       String line = autoLines[autoIdx++];
       while (line.length() < (unsigned)LCD_COLS) line += " ";
       rowText[r] = line;
     }
+  }
+
+  // 5. Выводим все 4 строки на дисплей
+  for (uint8_t r = 0; r < LCD_ROWS; r++) {
     lcd.setCursor(0, r);
     lcd.print(rowText[r].substring(0, LCD_COLS));
   }
@@ -571,9 +589,18 @@ void menuRules() {
 }
 
 // ================= МЕНЮ 1-WIRE, I2C И СИСТЕМЫ =================
+
+String formatOneWireId(const uint8_t addr[8]) {
+  char buf[17];
+  for (uint8_t i = 0; i < 8; i++) {
+    snprintf(buf + i * 2, 3, "%02X", addr[i]);
+  }
+  return String(buf);
+}
+
 void menuOneWire() {
   uint8_t pos = 0;
-  const char* items[] = {"1. Scan 1-Wire Bus", "2. Saved Sensors", "< Back"};
+  const char* items[3] = {"1. Scan 1-Wire Bus", "2. Saved Sensors", "< Back"};
   while (true) {
     pos = lcd.selectVal("1-Wire (GPIO14)", items, 3, false, pos);
     if (pos == 2) break;
@@ -581,7 +608,10 @@ void menuOneWire() {
       lcd.clear(); lcd.setCursor(0, 1); lcd.print("Scanning 1-Wire...");
       owSensorsBus.begin();
       delay(20);
-      uint8_t addr[8], found = 0;
+      uint8_t addr[8];
+      uint8_t found = 0;
+      String foundList[MAX_OW_SENSORS + 1];
+
       for (uint8_t attempt = 0; attempt < 3 && found == 0; attempt++) {
         oneWire.reset_search();
         delay(10);
@@ -598,8 +628,10 @@ void menuOneWire() {
           if (slot == -1) {
             for (int i = 0; i < MAX_OW_SENSORS; i++) {
               if (cfg.owSensors[i].addr[0] == 0) {
-                slot = i; memcpy(cfg.owSensors[i].addr, addr, 8);
-                cfg.owSensors[i].fmt.enabled = true; cfg.owSensors[i].fmt.showOnMain = true;
+                slot = i;
+                memcpy(cfg.owSensors[i].addr, addr, 8);
+                cfg.owSensors[i].fmt.enabled = true;
+                cfg.owSensors[i].fmt.showOnMain = true;
                 break;
               }
             }
@@ -608,26 +640,52 @@ void menuOneWire() {
             owSensorsBus.requestTemperaturesByAddress(addr);
             delay(750);
             owValues[slot] = owSensorsBus.getTempC(addr);
+            String tStr = isnan(owValues[slot]) ? "ERR" : (String(owValues[slot], 1) + "C");
+            String idFull = formatOneWireId(addr);
+            foundList[found] = idFull.substring(0, 6) + ".." + idFull.substring(12, 16) + " " + tStr;
             found++;
           }
         }
       }
       saveConfig();
-      String msg = "Found: " + String(found);
-      const char* ok[1] = {"< Back"};
-      lcd.selectVal(msg, ok, 1, false, 0);
+      foundList[found] = "< Back";
+      uint8_t fPos = 0;
+      while (true) {
+        fPos = lcd.selectVal("Found 1W: " + String(found), foundList, found + 1, false, fPos);
+        if (fPos == found) break;
+        int realIdx = -1, cnt = 0;
+        for (int i = 0; i < MAX_OW_SENSORS; i++) {
+          if (cfg.owSensors[i].addr[0] != 0) {
+            if (cnt == fPos) { realIdx = i; break; }
+            cnt++;
+          }
+        }
+        if (realIdx != -1) {
+          const char* ok[1] = {"< Back"};
+          lcd.selectVal(formatOneWireId(cfg.owSensors[realIdx].addr), ok, 1, false, 0);
+        }
+      }
     } else if (pos == 1) {
       uint8_t sPos = 0;
       while (true) {
         String sList[MAX_OW_SENSORS + 1];
         for (int i = 0; i < MAX_OW_SENSORS; i++) {
-          sList[i] = (cfg.owSensors[i].addr[0] != 0) ? String(cfg.owSensors[i].fmt.name) : ("Slot " + String(i + 1) + " [Empty]");
+          if (cfg.owSensors[i].addr[0] != 0) {
+            String id = formatOneWireId(cfg.owSensors[i].addr);
+            sList[i] = String(cfg.owSensors[i].fmt.name) + " [" + id.substring(12, 16) + "]";
+          } else {
+            sList[i] = "Slot " + String(i + 1) + " [Empty]";
+          }
         }
         sList[MAX_OW_SENSORS] = "< Back";
         sPos = lcd.selectVal("Saved DS18B20", sList, MAX_OW_SENSORS + 1, false, sPos);
         if (sPos == MAX_OW_SENSORS) break;
         if (cfg.owSensors[sPos].addr[0] != 0) {
-          editDisplayFormat(cfg.owSensors[sPos].fmt, 1, "Temp", "", "");
+          const char* sub[2] = {"Edit Format >", "< Back"};
+          uint8_t act = lcd.selectVal(formatOneWireId(cfg.owSensors[sPos].addr), sub, 2, false, 0);
+          if (act == 0) {
+            editDisplayFormat(cfg.owSensors[sPos].fmt, 1, "Temp", "", "");
+          }
         }
       }
     }
@@ -636,15 +694,22 @@ void menuOneWire() {
 
 void menuI2C() {
   uint8_t pos = 0;
-  const char* items[] = {"1. Scan I2C Bus", "2. Device Settings", "< Back"};
+  const char* items[3] = {"1. Scan I2C Bus", "2. Device Settings", "< Back"};
+  const char* tNames[8] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574"};
+
   while (true) {
     pos = lcd.selectVal("I2C Devices", items, 3, false, pos);
     if (pos == 2) break;
     if (pos == 0) {
       lcd.clear(); lcd.setCursor(0, 1); lcd.print("Scanning I2C...");
       uint8_t found = 0;
+      String foundList[MAX_I2C_DEVICES + 2];
+
       for (uint8_t addr = 1; addr < 127; addr++) {
+        yield();
         if (addr == LCD_ADDR || addr == RTC_ADDR) continue;
+        if (addr >= 0x50 && addr <= 0x57) continue;
+
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
           I2cDevType det = I2C_NONE;
@@ -659,24 +724,42 @@ void menuI2C() {
           if (slot == -1) {
             for (int i = 0; i < MAX_I2C_DEVICES; i++) {
               if (cfg.i2cDevices[i].addr == 0) {
-                slot = i; cfg.i2cDevices[i].addr = addr; cfg.i2cDevices[i].type = det;
-                cfg.i2cDevices[i].fmt.enabled = true; cfg.i2cDevices[i].fmt.showOnMain = true;
+                slot = i;
+                cfg.i2cDevices[i].addr = addr;
+                cfg.i2cDevices[i].type = det;
+                cfg.i2cDevices[i].fmt.enabled = true;
+                cfg.i2cDevices[i].fmt.showOnMain = true;
                 break;
               }
             }
           }
-          if (slot != -1) found++;
+          char hexBuf[6];
+          snprintf(hexBuf, sizeof(hexBuf), "0x%02X", addr);
+          uint8_t curType = (slot != -1) ? cfg.i2cDevices[slot].type : det;
+          foundList[found++] = String(hexBuf) + " (" + String(tNames[curType]) + ")";
         }
       }
       saveConfig();
-      const char* ok[] = {"< Back"};
-      lcd.selectVal("Found I2C: " + String(found), ok, 1, false, 0);
+      initPeripherals();
+
+      foundList[found] = "< Back";
+      uint8_t fPos = 0;
+      while (true) {
+        fPos = lcd.selectVal("Found I2C: " + String(found), foundList, found + 1, false, fPos);
+        if (fPos == found) break;
+      }
     } else if (pos == 1) {
       uint8_t dPos = 0;
       while (true) {
         String dList[MAX_I2C_DEVICES + 1];
         for (int i = 0; i < MAX_I2C_DEVICES; i++) {
-          dList[i] = (cfg.i2cDevices[i].addr != 0) ? String(cfg.i2cDevices[i].fmt.name) : ("Slot " + String(i + 1) + " [Empty]");
+          if (cfg.i2cDevices[i].addr != 0) {
+            char hexBuf[6];
+            snprintf(hexBuf, sizeof(hexBuf), "0x%02X", cfg.i2cDevices[i].addr);
+            dList[i] = String(cfg.i2cDevices[i].fmt.name) + " [" + String(hexBuf) + "]";
+          } else {
+            dList[i] = "Slot " + String(i + 1) + " [Empty]";
+          }
         }
         dList[MAX_I2C_DEVICES] = "< Back";
         dPos = lcd.selectVal("Select I2C", dList, MAX_I2C_DEVICES + 1, false, dPos);
@@ -684,9 +767,11 @@ void menuI2C() {
         if (cfg.i2cDevices[dPos].addr != 0) {
           uint8_t cardPos = 0;
           while (true) {
-            const char* tNames[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574"};
-            String cItems[4];
+            char hexBuf[6];
+            snprintf(hexBuf, sizeof(hexBuf), "0x%02X", cfg.i2cDevices[dPos].addr);
+            String cItems[6];
             uint8_t cn = 0;
+            cItems[cn++] = "Addr: " + String(hexBuf);
             cItems[cn++] = "Type: " + String(tNames[cfg.i2cDevices[dPos].type]);
             int pcfIdx = -1;
             if (cfg.i2cDevices[dPos].type == I2C_PCF8574) {
@@ -695,18 +780,32 @@ void menuI2C() {
             }
             int fmtIdx = cn;
             cItems[cn++] = "Display Format >";
+            int delIdx = cn;
+            cItems[cn++] = "Delete Device";
             cItems[cn++] = "< Back";
 
             cardPos = lcd.selectVal(cfg.i2cDevices[dPos].fmt.name, cItems, cn, false, cardPos);
             if (cardPos == cn - 1) break;
-            if (cardPos == 0) {
-              const char* types[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574", "< Back"};
+            if (cardPos == 1) {
+              const char* types[9] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574", "< Back"};
               uint8_t t = lcd.selectVal("Device Type", types, 9, false, (uint8_t)cfg.i2cDevices[dPos].type);
-              if (t < 8) { cfg.i2cDevices[dPos].type = (I2cDevType)t; saveConfig(); }
+              if (t < 8) {
+                cfg.i2cDevices[dPos].type = (I2cDevType)t;
+                saveConfig();
+                initPeripherals();
+              }
             } else if (cardPos == pcfIdx) {
               menuPcfPins(dPos);
             } else if (cardPos == fmtIdx) {
               editDisplayFormat(cfg.i2cDevices[dPos].fmt, 3, "P1", "P2", "P3");
+            } else if (cardPos == delIdx) {
+              if (editBoolSetting("Delete " + String(hexBuf) + "?", false)) {
+                cfg.i2cDevices[dPos].addr = 0;
+                cfg.i2cDevices[dPos].type = I2C_NONE;
+                cfg.i2cDevices[dPos].fmt.enabled = false;
+                saveConfig();
+                break;
+              }
             }
           }
         }
@@ -719,18 +818,20 @@ void menuSystem() {
   uint8_t pos = 0;
   while (true) {
     const char* blNames[] = {"Always ON", "Always OFF", "Auto Timer"};
-    String items[8] = {
+    String rtcBadge = rtcOnline ? ("RTC:OK " + getFormattedTime()) : "RTC:OFFLINE (0x68)";
+    String items[9] = {
       "Backlight: " + String(blNames[cfg.backlightMode]),
       "Auto-Off: " + String(cfg.backlightTimeout) + "s",
       "Poll Period: " + String(cfg.pollIntervalSec) + "s",
       "Servo Angle: " + String(cfg.servoAngle) + "d",
+      rtcBadge,
       "Sync NTP -> RTC",
       "Last RF: " + String(lastRfCode),
       "Reset Defaults",
       "< Back"
     };
-    pos = lcd.selectVal("System & LCD", items, 8, false, pos);
-    if (pos == 7) break;
+    pos = lcd.selectVal("System & LCD", items, 9, false, pos);
+    if (pos == 8) break;
     if (pos == 0) {
       const char* modes[4] = {"Always ON", "Always OFF", "Auto Timer", "< Back"};
       uint8_t m = lcd.selectVal("Backlight Mode", modes, 4, false, cfg.backlightMode);
@@ -746,10 +847,15 @@ void menuSystem() {
       uint8_t ang = (uint8_t)lcd.inputVal("Servo (0..180):", 0, 180, (int)cfg.servoAngle, 5);
       setServoAngle(ang);
     } else if (pos == 4) {
+      initRtc();
+      String rInfo = rtcOnline ? ("0x68 OK " + getFormattedTime()) : "0x68 Not Found!";
+      const char* ok[1] = {"< Back"};
+      lcd.selectVal(rInfo, ok, 1, false, 0);
+    } else if (pos == 5) {
       syncRtcWithNtp();
       const char* ok[1] = {"< Back"};
       lcd.selectVal(ntpSynced ? "RTC Synced!" : "NTP Not Ready", ok, 1, false, 0);
-    } else if (pos == 6) {
+    } else if (pos == 7) {
       if (editBoolSetting("Reset All?", false)) {
         setDefaultConfig();
         saveConfig();
