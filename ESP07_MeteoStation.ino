@@ -1,7 +1,7 @@
 #include "Config.h"
 #include "Sensors.h"
-#include "WebServer.h"
 #include "DisplayMenu.h"
+#include "WebServer.h"
 
 bool lastBtnReading = HIGH;
 bool btnStableState = HIGH;
@@ -10,22 +10,68 @@ bool btnPressedFlag = false;
 unsigned long lastNtpCheck = 0;
 unsigned long lastClockDraw = 0;
 
-bool checkMainScreenButtonClick() {
+unsigned long btnPressStart = 0;
+bool longPressHandled = false;
+
+// Возвращает: 0 = нет события, 1 = короткий клик, 2 = длинное удержание (>= 1.5 сек)
+uint8_t checkMainScreenButtonEvent() {
   bool reading = digitalRead(pinSW);
   if (reading != lastBtnReading) lastBtnDebounceTime = millis();
+
   if ((millis() - lastBtnDebounceTime) > 35) {
     if (reading != btnStableState) {
       btnStableState = reading;
-      if (btnStableState == LOW) btnPressedFlag = true;
-      else if (btnStableState == HIGH && btnPressedFlag) {
+      if (btnStableState == LOW) {
+        btnPressedFlag = true;
+        btnPressStart = millis();
+        longPressHandled = false;
+      } else if (btnStableState == HIGH && btnPressedFlag) {
         btnPressedFlag = false;
         lastBtnReading = reading;
-        return true;
+        if (!longPressHandled) return 1; // Короткий клик при отпускании
       }
     }
   }
+
+  // Срабатывание длинного нажатия прямо во время удержания (не дожидаясь отпускания)
+  if (btnStableState == LOW && btnPressedFlag && !longPressHandled && (millis() - btnPressStart >= 1500)) {
+    longPressHandled = true;
+    lastBtnReading = reading;
+    return 2;
+  }
+
   lastBtnReading = reading;
-  return false;
+  return 0;
+}
+
+void recoverI2cBusAndDisplay() {
+  // 1. 9 тактов SCL для освобождения SDA
+  pinMode(pinSDA, INPUT_PULLUP);
+  pinMode(pinSCL, OUTPUT);
+  for (uint8_t i = 0; i < 9; i++) {
+    digitalWrite(pinSCL, LOW);
+    delayMicroseconds(10);
+    digitalWrite(pinSCL, HIGH);
+    delayMicroseconds(10);
+  }
+  pinMode(pinSDA, OUTPUT);
+  digitalWrite(pinSDA, LOW);
+  delayMicroseconds(10);
+  digitalWrite(pinSCL, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(pinSDA, HIGH);
+  delayMicroseconds(10);
+
+  // 2. Инициализируем LCD, а затем ОБЯЗАТЕЛЬНО заново задаём пины и частоту Wire!
+  lcd.begin();
+  Wire.begin(pinSDA, pinSCL);
+  Wire.setClock(50000);
+
+  lcd.createChar(7, degreeChar);
+  updateBacklight();
+  initRtc();
+  initPeripherals();
+  drawMainScreen();
 }
 
 void setup() {
@@ -92,15 +138,20 @@ void loop() {
     lastNtpCheck = now;
     syncRtcWithNtp();
   }
-
-  // 3. Проверка нажатия кнопки энкодера для входа в меню
-  if (checkMainScreenButtonClick()) {
+  
+  // 3. Проверка нажатия (короткий клик -> меню, долгое удержание 1.5с -> сброс I2C/LCD)
+  uint8_t btnEv = checkMainScreenButtonEvent();
+  if (btnEv == 1) {
     bool wasOff = !isBacklightOn;
     registerUserActivity();
     if (!wasOff) {
       openMainMenu();
       return;
     }
+  } else if (btnEv == 2) {
+    registerUserActivity();
+    recoverI2cBusAndDisplay();
+    return;
   }
 
   // 4. Прокрутка главного экрана энкодером
@@ -118,8 +169,21 @@ void loop() {
   // 5. Обновление часов и напряжения АКБ на экране раз в 2 секунды
   if (now - lastClockDraw >= 2000) {
     lastClockDraw = now;
-    updatePowerStatus();
-    drawMainScreen();
+    Wire.beginTransmission(LCD_ADDR);
+    bool lcdAlive = (Wire.endTransmission() == 0);
+    bool anyI2cOffline = false;
+    for (uint8_t i = 0; i < MAX_I2C_DEVICES; i++) {
+      if (cfg.i2cDevices[i].fmt.enabled && !i2cValues[i].online) {
+        anyI2cOffline = true;
+        break;
+      }
+    }
+    if (!lcdAlive || anyI2cOffline) {
+      recoverI2cBusAndDisplay();
+    } else {
+      updatePowerStatus();
+      drawMainScreen();
+    }
   }
 
   if (digitalRead(pinSW) == LOW) return;

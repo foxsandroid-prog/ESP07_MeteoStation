@@ -3,6 +3,9 @@
 #include "Config.h"
 #include "Sensors.h"
 
+void updateBacklight();
+void recoverI2cBusAndDisplay();
+
 ESP8266WebServer server(80);
 
 bool checkWebAuth() {
@@ -48,10 +51,10 @@ void handleApiSensor() {
         target.equalsIgnoreCase(cfg.dhtSensors[i].fmt.name)) {
       if (param.equalsIgnoreCase("hum")) {
         server.send(200, "text/plain",
-          isnan(dhtHum[i]) ? "NaN" : String(dhtHum[i], 1));
+                    isnan(dhtHum[i]) ? "NaN" : String(dhtHum[i], 1));
       } else {
         server.send(200, "text/plain",
-          isnan(dhtTemp[i]) ? "NaN" : String(dhtTemp[i], 1));
+                    isnan(dhtTemp[i]) ? "NaN" : String(dhtTemp[i], 1));
       }
       return;
     }
@@ -107,7 +110,7 @@ void handleApiAll() {
   if (cfg.net.wifiMode == 2) wStr = "AP (" + WiFi.softAPIP().toString() + ")";
   else if (cfg.net.wifiMode == 1) {
     wStr = (WiFi.status() == WL_CONNECTED) ?
-      ("STA (" + WiFi.localIP().toString() + ")") : "STA (Поиск...)";
+           ("STA (" + WiFi.localIP().toString() + ")") : "STA (Поиск...)";
   }
   json += "\"wifi\":\"" + wStr + "\",";
 
@@ -198,8 +201,10 @@ button.rl{margin:4px;padding:10px 14px;color:#fff;border:none;border-radius:4px;
 <div id='sys'>Загрузка...</div>
 <table><thead><tr><th>Датчик</th><th>Значение</th><th>API</th></tr></thead><tbody id='tb'></tbody></table>
 <div id='rel'></div>
-<a class='btn' href='/rules'>Правила автоматизации</a>
-<a class='btn' href='/settings'>Настройки (Пароль)</a>
+<a class='btn' href='/sensors'>Датчики</a>
+<a class='btn' href='/rules'>Автоматизация</a>
+<a class='btn' href='/net'>Сеть и Wi-Fi</a>
+<a class='btn' href='/sys'>Система и RTC</a>
 <script>
 function tog(d,p){fetch('/api/relay?dev='+d+'&pin='+p).then(()=>upd());}
 function upd(){fetch('/api/all').then(r=>r.json()).then(d=>{
@@ -285,7 +290,7 @@ void handleSettings() {
   html += "<option value='2'" + String(cfg.net.wifiMode == 2 ? " selected" : "") + ">Точка доступа (AP)</option></select>";
 
   html += "SSID (до 16 симв):<input name='ssid' maxlength='16' value='" + String(cfg.net.ssid) + "'>";
-  html += "Пароль Wi-Fi (до 16):<input name='wpass' maxlength='16' value='" + String(cfg.net.password) + "'>";
+  html += "Пароль Wi-Fi (до 16):<input name='wpass' type='password' maxlength='16' value='" + String(cfg.net.password) + "'>";
   html += "IP режим:<select name='dhcp'><option value='0'" + String(!cfg.net.useStaticIp ? " selected" : "") + ">DHCP</option>";
   html += "<option value='1'" + String(cfg.net.useStaticIp ? " selected" : "") + ">Статический IP</option></select>";
 
@@ -381,6 +386,347 @@ void handleSave() {
   if (netChanged) { delay(300); applyNetworkSettings(); }
 }
 
+void handleNetSettings() {
+  if (!checkWebAuth()) return;
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+
+  server.sendContent(F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Сеть</title>"
+    "<style>body{font-family:sans-serif;max-width:520px;margin:auto;padding:15px;background:#121212;color:#eee}"
+    "input,select{width:100%;padding:6px;margin:4px 0 10px;box-sizing:border-box}"
+    "button{padding:10px 16px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer}"
+    "a{color:#64b5f6}</style></head><body><h2>Сетевые настройки и Wi-Fi</h2><form method='POST' action='/save_net'>"));
+
+  String s = "Режим Wi-Fi:<select name='wmode'>";
+  s += "<option value='0'" + String(cfg.net.wifiMode == 0 ? " selected" : "") + ">OFF</option>";
+  s += "<option value='1'" + String(cfg.net.wifiMode == 1 ? " selected" : "") + ">Клиент (STA)</option>";
+  s += "<option value='2'" + String(cfg.net.wifiMode == 2 ? " selected" : "") + ">Точка доступа (AP)</option></select>";
+  s += "SSID (до 16 симв):<input name='ssid' maxlength='16' value='" + String(cfg.net.ssid) + "'>";
+  s += "Пароль Wi-Fi (до 16):<input name='wpass' maxlength='16' value='" + String(cfg.net.password) + "'>";
+  s += "IP режим:<select name='dhcp'><option value='0'" + String(!cfg.net.useStaticIp ? " selected" : "") + ">DHCP</option>";
+  s += "<option value='1'" + String(cfg.net.useStaticIp ? " selected" : "") + ">Статический IP</option></select>";
+  server.sendContent(s);
+
+  char ipBuf[20];
+  s = "";
+  snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", cfg.net.ip[0], cfg.net.ip[1], cfg.net.ip[2], cfg.net.ip[3]);
+  s += "Стат. IP:<input name='ip' value='" + String(ipBuf) + "'>";
+  snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", cfg.net.gateway[0], cfg.net.gateway[1], cfg.net.gateway[2], cfg.net.gateway[3]);
+  s += "Шлюз (Gateway):<input name='gw' value='" + String(ipBuf) + "'>";
+  snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", cfg.net.subnet[0], cfg.net.subnet[1], cfg.net.subnet[2], cfg.net.subnet[3]);
+  s += "Маска (Subnet):<input name='sn' value='" + String(ipBuf) + "'>";
+  snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", cfg.net.dns[0], cfg.net.dns[1], cfg.net.dns[2], cfg.net.dns[3]);
+  s += "DNS:<input name='dns' value='" + String(ipBuf) + "'>";
+  s += "Web Логин:<input name='wuser' maxlength='16' value='" + String(cfg.net.webUser) + "'>";
+  s += "Web Пароль:<input name='webpass' maxlength='16' value='" + String(cfg.net.webPass) + "'>";
+  s += "<button type='submit'>Сохранить сеть</button></form><br><a href='/'>На главную</a></body></html>";
+  server.sendContent(s);
+}
+
+void handleSaveNet() {
+  if (!checkWebAuth()) return;
+  bool netChanged = false;
+  if (server.hasArg("wmode")) { uint8_t m = server.arg("wmode").toInt(); if (m != cfg.net.wifiMode) { cfg.net.wifiMode = m; netChanged = true; } }
+  if (server.hasArg("ssid") && server.arg("ssid") != String(cfg.net.ssid)) { strlcpy(cfg.net.ssid, server.arg("ssid").c_str(), sizeof(cfg.net.ssid)); netChanged = true; }
+  if (server.hasArg("wpass") && server.arg("wpass") != String(cfg.net.password)) { strlcpy(cfg.net.password, server.arg("wpass").c_str(), sizeof(cfg.net.password)); netChanged = true; }
+  if (server.hasArg("dhcp")) { bool st = (server.arg("dhcp").toInt() == 1); if (st != cfg.net.useStaticIp) { cfg.net.useStaticIp = st; netChanged = true; } }
+  if (server.hasArg("ip")) parseIpString(server.arg("ip"), cfg.net.ip);
+  if (server.hasArg("gw")) parseIpString(server.arg("gw"), cfg.net.gateway);
+  if (server.hasArg("sn")) parseIpString(server.arg("sn"), cfg.net.subnet);
+  if (server.hasArg("dns")) parseIpString(server.arg("dns"), cfg.net.dns);
+  if (server.hasArg("wuser")) strlcpy(cfg.net.webUser, server.arg("wuser").c_str(), sizeof(cfg.net.webUser));
+  if (server.hasArg("webpass")) strlcpy(cfg.net.webPass, server.arg("webpass").c_str(), sizeof(cfg.net.webPass));
+
+  saveConfig();
+  server.send(200, "text/html", "<meta charset='utf-8'>Сетевые настройки сохранены! <a href='/net'>Назад</a> | <a href='/'>На главную</a>");
+  if (netChanged) { delay(300); applyNetworkSettings(); }
+}
+
+void handleSysSettings() {
+  if (!checkWebAuth()) return;
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+
+  server.sendContent(F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Система</title>"
+    "<style>body{font-family:sans-serif;max-width:520px;margin:auto;padding:15px;background:#121212;color:#eee}"
+    "input,select{width:100%;padding:6px;margin:4px 0 10px;box-sizing:border-box}"
+    "button{padding:10px 16px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer;margin:4px 4px 4px 0}"
+    ".warn{background:#c62828}.info{background:#1565c0}.box{border:1px solid #333;padding:10px;border-radius:6px;margin-bottom:14px}"
+    "a{color:#64b5f6}</style></head><body><h2>Системные настройки</h2>"));
+
+  String s = "<div class='box'><b>Статус RTC (0x68):</b> " + String(rtcOnline ? "Online" : "Offline") +
+             " | <b>Время:</b> " + getFormattedTime() + " | <b>NTP:</b> " + String(ntpSynced ? "Синхр." : "Нет") +
+             "<br><form method='POST' action='/save_sys' style='margin-top:8px'>"
+             "<button class='info' type='submit' name='act' value='ntp'>Синхронизировать NTP -> RTC</button></form></div>";
+
+  s += "<form method='POST' action='/save_sys'>";
+  s += "Часовой пояс (UTC):<input type='number' min='-12' max='14' name='tz' value='" + String(cfg.net.timezone) + "'>";
+  s += "Режим подсветки LCD:<select name='blm'>";
+  s += "<option value='0'" + String(cfg.backlightMode == 0 ? " selected" : "") + ">Всегда ВКЛ</option>";
+  s += "<option value='1'" + String(cfg.backlightMode == 1 ? " selected" : "") + ">Всегда ВЫКЛ</option>";
+  s += "<option value='2'" + String(cfg.backlightMode == 2 ? " selected" : "") + ">Автотаймер</option></select>";
+  s += "Таймаут подсветки (сек):<input type='number' min='5' max='3600' name='blt' value='" + String(cfg.backlightTimeout) + "'>";
+  s += "Период опроса датчиков (сек):<input type='number' min='1' max='3600' name='poll' value='" + String(cfg.pollIntervalSec) + "'>";
+  s += "Угол сервопривода (0..180):<input type='number' min='0' max='180' name='servo' value='" + String(cfg.servoAngle) + "'>";
+  s += "Контроль 24V PCF слот (0=выкл, 1..8):<input type='number' min='0' max='8' name='psdev' value='" + String(cfg.powerSensePcfIdx == 255 ? 0 : cfg.powerSensePcfIdx + 1) + "'>";
+  s += "Контроль 24V PCF пин (0..7):<input type='number' min='0' max='7' name='psbit' value='" + String(cfg.powerSensePcfBit) + "'>";
+  s += "<button type='submit' name='act' value='save'>Сохранить настройки</button></form>";
+
+  s += "<div class='box' style='margin-top:16px'><b>Обслуживание и питание</b><br><br>"
+     "<form method='POST' action='/recover_i2c' style='display:inline'>"
+     "<button class='info' type='submit'>Восстановить LCD и I2C</button></form> "
+     "<form method='POST' action='/reboot' style='display:inline' onsubmit=\"return confirm('Вы действительно хотите перезагрузить метеостанцию ESP-07?');\">"
+     "<button class='warn' type='submit'>Перезагрузить устройство</button></form></div>"
+     "<a href='/'>На главную</a></body></html>";
+  server.sendContent(s);
+}
+
+void handleSaveSys() {
+  if (!checkWebAuth()) return;
+  if (server.hasArg("act") && server.arg("act") == "ntp") {
+    initRtc();
+    syncRtcWithNtp();
+    server.send(200, "text/html", "<meta charset='utf-8'>Запрос синхронизации NTP -> RTC выполнен! <a href='/sys'>Назад</a>");
+    return;
+  }
+  if (server.hasArg("tz")) {
+    cfg.net.timezone = constrain(server.arg("tz").toInt(), -12, 14);
+    configTime((long)cfg.net.timezone * 3600L, 0, "pool.ntp.org", "time.nist.gov");
+  }
+  if (server.hasArg("blm")) cfg.backlightMode = constrain(server.arg("blm").toInt(), 0, 2);
+  if (server.hasArg("blt")) cfg.backlightTimeout = constrain(server.arg("blt").toInt(), 5, 3600);
+  if (server.hasArg("poll")) cfg.pollIntervalSec = constrain(server.arg("poll").toInt(), 1, 3600);
+  if (server.hasArg("servo")) setServoAngle(constrain(server.arg("servo").toInt(), 0, 180));
+  if (server.hasArg("psdev")) {
+    int v = server.arg("psdev").toInt();
+    cfg.powerSensePcfIdx = (v <= 0) ? 255 : constrain(v - 1, 0, MAX_I2C_DEVICES - 1);
+  }
+  if (server.hasArg("psbit")) cfg.powerSensePcfBit = constrain(server.arg("psbit").toInt(), 0, 7);
+
+  saveConfig();
+  updateBacklight();
+  server.send(200, "text/html", "<meta charset='utf-8'>Системные настройки сохранены! <a href='/sys'>Назад</a> | <a href='/'>На главную</a>");
+}
+
+void handleRecoverI2c() {
+  if (!checkWebAuth()) return;
+  recoverI2cBusAndDisplay();
+  server.send(200, "text/html", "<meta charset='utf-8'>Шина I2C и дисплей LCD2004 перезапущены! <a href='/sys'>Назад</a> | <a href='/'>На главную</a>");
+}
+
+void handleReboot() {
+  if (!checkWebAuth()) return;
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/html", "<meta charset='utf-8'><meta http-equiv='refresh' content='10;url=/'>Перезагрузка ESP-07... Обновление через 10 сек.");
+  delay(200);
+  ESP.reset(); // Аппаратный программный сброс ядра работает надёжнее ESP.restart() после UART-прошивки
+}
+
+
+String renderFmtHtml(const DisplayFormat &f, uint8_t pCount, const char *p1, const char *p2, const char *p3) {
+  String h = "<label><input type='checkbox' name='en'" + String(f.enabled ? " checked" : "") + "> Включен</label> ";
+  h += "<label><input type='checkbox' name='main'" + String(f.showOnMain ? " checked" : "") + "> На гл. экране</label> ";
+  h += "<label><input type='checkbox' name='snm'" + String(f.showName ? " checked" : "") + "> Показ. имя</label><br>";
+  h += "Имя (до 8): <input name='name' size='8' maxlength='8' value='" + String(f.name) + "'> ";
+  h += "Строка (-1..3): <input type='number' min='-1' max='3' name='row' style='width:52px' value='" + String(f.row) + "'> ";
+  h += "Столбец (-1..19): <input type='number' min='-1' max='19' name='col' style='width:52px' value='" + String(f.col) + "'><br>";
+  h += "<label><input type='checkbox' name='p1'" + String(f.showP1 ? " checked" : "") + "> " + String(p1) + "</label> ";
+  if (pCount >= 2) h += "<label><input type='checkbox' name='p2'" + String(f.showP2 ? " checked" : "") + "> " + String(p2) + "</label> ";
+  if (pCount >= 3) h += "<label><input type='checkbox' name='p3'" + String(f.showP3 ? " checked" : "") + "> " + String(p3) + "</label> ";
+  h += "<label><input type='checkbox' name='dec'" + String(f.showDecimals ? " checked" : "") + "> Дробные</label> ";
+  h += "<label><input type='checkbox' name='pls'" + String(f.showPlusSign ? " checked" : "") + "> Знак +</label> ";
+  h += "<label><input type='checkbox' name='unt'" + String(f.showUnit ? " checked" : "") + "> Ед.изм.</label><br>";
+  return h;
+}
+
+void applyFmtFromArgs(DisplayFormat &f) {
+  f.enabled = server.hasArg("en");
+  f.showOnMain = server.hasArg("main");
+  f.showName = server.hasArg("snm");
+  if (server.hasArg("name")) strlcpy(f.name, server.arg("name").c_str(), sizeof(f.name));
+  if (server.hasArg("row")) f.row = constrain(server.arg("row").toInt(), -1, 3);
+  if (server.hasArg("col")) f.col = constrain(server.arg("col").toInt(), -1, 19);
+  f.showP1 = server.hasArg("p1");
+  f.showP2 = server.hasArg("p2");
+  f.showP3 = server.hasArg("p3");
+  f.showDecimals = server.hasArg("dec");
+  f.showPlusSign = server.hasArg("pls");
+  f.showUnit = server.hasArg("unt");
+}
+
+void handleSensorsPage() {
+  if (!checkWebAuth()) return;
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+
+  server.sendContent(F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Датчики</title>"
+    "<style>body{font-family:sans-serif;max-width:720px;margin:auto;padding:12px;background:#121212;color:#eee}"
+    ".card{border:1px solid #333;padding:10px;margin-bottom:10px;border-radius:6px;background:#1a1a1a}"
+    "input,select{padding:4px;margin:2px}button{padding:7px 12px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer}"
+    ".scan{background:#1565c0;margin-right:6px}.del{background:#c62828}a{color:#64b5f6}</style></head><body>"
+    "<h2>Управление датчиками</h2>"
+    "<form method='POST' action='/scan_sensors' style='margin-bottom:14px'>"
+    "<button class='scan' type='submit' name='bus' value='ow'>Сканировать 1-Wire</button>"
+    "<button class='scan' type='submit' name='bus' value='i2c'>Сканировать I2C</button>"
+    "<a href='/' style='margin-left:10px'>На главную</a></form>"));
+
+  // 1. DHT22
+  server.sendContent(F("<h3>Датчик DHT22 (GPIO2)</h3><div class='card'><form method='POST' action='/save_sensor'>"
+    "<input type='hidden' name='kind' value='dht'><input type='hidden' name='idx' value='0'>"));
+  String h = "Режим: <select name='dmode'>";
+  h += "<option value='0'" + String(cfg.dhtSensors[0].mode == 0 ? " selected" : "") + ">Темп + Влажн</option>";
+  h += "<option value='1'" + String(cfg.dhtSensors[0].mode == 1 ? " selected" : "") + ">Только Темп</option>";
+  h += "<option value='2'" + String(cfg.dhtSensors[0].mode == 2 ? " selected" : "") + ">Только Влажн</option></select><br>";
+  h += renderFmtHtml(cfg.dhtSensors[0].fmt, 2, "Темп", "Влажн", "");
+  h += "<button type='submit'>Сохранить DHT</button></form></div>";
+  server.sendContent(h);
+
+  // 2. 1-Wire DS18B20
+  server.sendContent(F("<h3>Датчики 1-Wire (DS18B20)</h3>"));
+  for (int i = 0; i < MAX_OW_SENSORS; i++) {
+    if (cfg.owSensors[i].addr[0] == 0) continue;
+    char idBuf[17];
+    for (int b = 0; b < 8; b++) snprintf(idBuf + b * 2, 3, "%02X", cfg.owSensors[i].addr[b]);
+    h = "<div class='card'><form method='POST' action='/save_sensor'>";
+    h += "<input type='hidden' name='kind' value='ow'><input type='hidden' name='idx' value='" + String(i) + "'>";
+    h += "<b>Слот #" + String(i + 1) + "</b> | ID: <code>" + String(idBuf) + "</code> | Текущ: <b>" +
+         (isnan(owValues[i]) ? "ERR" : String(owValues[i], 1) + " C") + "</b><br>";
+    h += renderFmtHtml(cfg.owSensors[i].fmt, 1, "Темп", "", "");
+    h += "<button type='submit' name='act' value='save'>Сохранить</button> ";
+    h += "<button class='del' type='submit' name='act' value='del' onclick=\"return confirm('Удалить датчик?');\">Удалить</button></form></div>";
+    server.sendContent(h);
+  }
+
+  // 3. I2C устройства
+  server.sendContent(F("<h3>I2C устройства</h3>"));
+  const char* tNames[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574"};
+  for (int i = 0; i < MAX_I2C_DEVICES; i++) {
+    if (cfg.i2cDevices[i].addr == 0) continue;
+    char hexBuf[6];
+    snprintf(hexBuf, sizeof(hexBuf), "0x%02X", cfg.i2cDevices[i].addr);
+    h = "<div class='card'><form method='POST' action='/save_sensor'>";
+    h += "<input type='hidden' name='kind' value='i2c'><input type='hidden' name='idx' value='" + String(i) + "'>";
+    h += "<b>Слот #" + String(i + 1) + "</b> | Адрес: <code>" + String(hexBuf) + "</code> | Тип: <select name='itype'>";
+    for (int t = 0; t < 8; t++)
+      h += "<option value='" + String(t) + "'" + String(cfg.i2cDevices[i].type == t ? " selected" : "") + ">" + String(tNames[t]) + "</option>";
+    h += "</select><br>";
+    h += renderFmtHtml(cfg.i2cDevices[i].fmt, 3, "P1", "P2", "P3");
+
+    if (cfg.i2cDevices[i].type == I2C_PCF8574) {
+      h += "<div style='margin:6px 0;padding:6px;border:1px dashed #444'><b>Каналы PCF8574:</b><br>";
+      for (int p = 0; p < 8; p++) {
+        bool isOut = (cfg.i2cDevices[i].pcfDirMask >> p) & 1;
+        bool isInv = (cfg.i2cDevices[i].pcfInvMask >> p) & 1;
+        h += "P" + String(p) + ": <input name='pn" + String(p) + "' size='6' maxlength='6' value='" + String(cfg.i2cDevices[i].pcfPinNames[p]) + "'> ";
+        h += "<select name='pd" + String(p) + "'><option value='1'" + String(isOut ? " selected" : "") + ">OUT</option>";
+        h += "<option value='0'" + String(!isOut ? " selected" : "") + ">IN</option></select> ";
+        h += "<label><input type='checkbox' name='pi" + String(p) + "'" + String(isInv ? " checked" : "") + "> Инверт.</label><br>";
+      }
+      h += "</div>";
+    }
+    h += "<button type='submit' name='act' value='save'>Сохранить</button> ";
+    h += "<button class='del' type='submit' name='act' value='del' onclick=\"return confirm('Удалить I2C устройство?');\">Удалить</button></form></div>";
+    server.sendContent(h);
+  }
+  server.sendContent(F("<br><a href='/'>На главную</a></body></html>"));
+}
+
+void handleScanSensors() {
+  if (!checkWebAuth()) return;
+  String bus = server.arg("bus");
+  uint8_t found = 0;
+  if (bus == "ow") {
+    owSensorsBus.begin();
+    uint8_t addr[8];
+    oneWire.reset_search();
+    while (oneWire.search(addr)) {
+      if (OneWire::crc8(addr, 7) != addr[7]) continue;
+      int slot = -1;
+      for (int i = 0; i < MAX_OW_SENSORS; i++) if (memcmp(cfg.owSensors[i].addr, addr, 8) == 0) slot = i;
+      if (slot == -1) {
+        for (int i = 0; i < MAX_OW_SENSORS; i++) {
+          if (cfg.owSensors[i].addr[0] == 0) {
+            slot = i; memcpy(cfg.owSensors[i].addr, addr, 8);
+            cfg.owSensors[i].fmt.enabled = true; cfg.owSensors[i].fmt.showOnMain = true;
+            break;
+          }
+        }
+      }
+      if (slot != -1) found++;
+    }
+  } else if (bus == "i2c") {
+    for (uint8_t addr = 1; addr < 127; addr++) {
+      if (addr == LCD_ADDR || addr == RTC_ADDR || (addr >= 0x50 && addr <= 0x57)) continue;
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        I2cDevType det = I2C_NONE;
+        if (addr == 0x23 || addr == 0x5C) det = I2C_BH1750;
+        else if (addr == 0x38) det = I2C_AHT20;
+        else if (addr == 0x44 || addr == 0x45) det = I2C_SHT41;
+        else if (addr == 0x76 || addr == 0x77) det = I2C_BMP280;
+        else if ((addr >= 0x20 && addr <= 0x27) || (addr >= 0x39 && addr <= 0x3F)) det = I2C_PCF8574;
+
+        int slot = -1;
+        for (int i = 0; i < MAX_I2C_DEVICES; i++) if (cfg.i2cDevices[i].addr == addr) slot = i;
+        if (slot == -1) {
+          for (int i = 0; i < MAX_I2C_DEVICES; i++) {
+            if (cfg.i2cDevices[i].addr == 0) {
+              slot = i; cfg.i2cDevices[i].addr = addr; cfg.i2cDevices[i].type = det;
+              cfg.i2cDevices[i].fmt.enabled = true; cfg.i2cDevices[i].fmt.showOnMain = true;
+              break;
+            }
+          }
+        }
+        if (slot != -1) found++;
+      }
+    }
+  }
+  saveConfig();
+  initPeripherals();
+  server.send(200, "text/html", "<meta charset='utf-8'>Найдено устройств: " + String(found) + ". <a href='/sensors'>Вернуться к датчикам</a>");
+}
+
+void handleSaveSensor() {
+  if (!checkWebAuth()) return;
+  String kind = server.arg("kind");
+  int idx = server.arg("idx").toInt();
+  String act = server.arg("act");
+
+  if (kind == "dht" && idx >= 0 && idx < MAX_DHT_SENSORS) {
+    if (server.hasArg("dmode")) cfg.dhtSensors[idx].mode = constrain(server.arg("dmode").toInt(), 0, 2);
+    applyFmtFromArgs(cfg.dhtSensors[idx].fmt);
+  } else if (kind == "ow" && idx >= 0 && idx < MAX_OW_SENSORS) {
+    if (act == "del") {
+      memset(cfg.owSensors[idx].addr, 0, 8);
+      cfg.owSensors[idx].fmt.enabled = false;
+    } else {
+        applyFmtFromArgs(cfg.owSensors[idx].fmt);
+    }
+    } else if (kind == "i2c" && idx >= 0 && idx < MAX_I2C_DEVICES) {
+        if (act == "del") {
+          cfg.i2cDevices[idx].addr = 0;
+          cfg.i2cDevices[idx].type = I2C_NONE;
+          cfg.i2cDevices[idx].fmt.enabled = false;
+        } else {
+            if (server.hasArg("itype")) cfg.i2cDevices[idx].type = (I2cDevType)constrain(server.arg("itype").toInt(), 0, 7);
+            applyFmtFromArgs(cfg.i2cDevices[idx].fmt);
+            if (cfg.i2cDevices[idx].type == I2C_PCF8574) {
+              for (int p = 0; p < 8; p++) {
+                if (server.hasArg("pn" + String(p))) strlcpy(cfg.i2cDevices[idx].pcfPinNames[p], server.arg("pn" + String(p)).c_str(), 7);
+                if (server.arg("pd" + String(p)).toInt() == 1) cfg.i2cDevices[idx].pcfDirMask |= (1 << p);
+                else cfg.i2cDevices[idx].pcfDirMask &= ~(1 << p);
+                if (server.hasArg("pi" + String(p))) cfg.i2cDevices[idx].pcfInvMask |= (1 << p);
+                else cfg.i2cDevices[idx].pcfInvMask &= ~(1 << p);
+              }
+            applyPcfOutputs(idx);
+            }
+          }
+    }
+  saveConfig();
+  initPeripherals();
+  server.send(200, "text/html", "Настройки датчика сохранены! Назад к датчикам | На главную");
+}
+
 void initWebServer() {
 server.on("/", handleRoot);
 server.on("/api/all", handleApiAll);
@@ -388,7 +734,16 @@ server.on("/api/sensor", handleApiSensor);
 server.on("/api/relay", handleApiRelay);
 server.on("/rules", handleRules);
 server.on("/save_rules", HTTP_POST, handleSaveRules);
-server.on("/settings", handleSettings);
-server.on("/save", HTTP_POST, handleSave);
+//server.on("/settings", handleSettings);
+//server.on("/save", HTTP_POST, handleSave);
+server.on("/net", handleNetSettings);
+server.on("/save_net", HTTP_POST, handleSaveNet);
+server.on("/sys", handleSysSettings);
+server.on("/save_sys", HTTP_POST, handleSaveSys);
+server.on("/recover_i2c", HTTP_POST, handleRecoverI2c);
+server.on("/reboot", HTTP_POST, handleReboot);
+server.on("/sensors", handleSensorsPage);
+server.on("/scan_sensors", HTTP_POST, handleScanSensors);
+server.on("/save_sensor", HTTP_POST, handleSaveSensor);
 server.begin();
 }
