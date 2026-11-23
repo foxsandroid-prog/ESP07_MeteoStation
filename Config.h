@@ -136,6 +136,7 @@ struct SystemConfig {
   DhtSensorCfg dhtSensors[MAX_DHT_SENSORS];
   I2cDeviceCfg i2cDevices[MAX_I2C_DEVICES];
   AutoRule rules[MAX_RULES];
+  uint8_t i2cIgnoreAddrs[8]; // Исключаемые I2C-адреса при сканировании (0 = пустой слот)
 } cfg;
 
 // ================= РАБОЧИЕ ДАННЫЕ =================
@@ -209,6 +210,10 @@ void setDefaultConfig() {
     dhtHum[i] = NAN;
   }
 
+// список адресов игнора в i2c
+   memset(cfg.i2cIgnoreAddrs, 0, sizeof(cfg.i2cIgnoreAddrs));
+   cfg.i2cIgnoreAddrs[0] = 0x50;  // 0x50 и 0x57 стандартные адреса EEPROM AT24C32 на модулях часов RTC
+
   for (int i = 0; i < MAX_I2C_DEVICES; i++) {
     snprintf(cfg.i2cDevices[i].fmt.name, 9, "I2C_%d", i + 1);
     cfg.i2cDevices[i].fmt.row = -1;
@@ -261,6 +266,14 @@ void loadConfig() {
     dhtTemp[i] = NAN;
     dhtHum[i] = NAN;
   }
+}
+
+bool isI2cAddressIgnored(uint8_t addr) {
+  if (addr == LCD_ADDR || addr == RTC_ADDR) return true;
+  for (uint8_t i = 0; i < 8; i++) {
+    if (cfg.i2cIgnoreAddrs[i] != 0 && cfg.i2cIgnoreAddrs[i] == addr) return true;
+  }
+  return false;
 }
 
 // ================= УПРАВЛЕНИЕ PCF8574 =================

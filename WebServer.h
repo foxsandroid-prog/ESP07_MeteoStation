@@ -518,8 +518,9 @@ void handleReboot() {
   if (!checkWebAuth()) return;
   server.sendHeader("Connection", "close");
   server.send(200, "text/html", "<meta charset='utf-8'><meta http-equiv='refresh' content='10;url=/'>Перезагрузка ESP-07... Обновление через 10 сек.");
-  delay(200);
-  ESP.reset(); // Аппаратный программный сброс ядра работает надёжнее ESP.restart() после UART-прошивки
+  delay(300);
+//  ESP.reset(); // Аппаратный программный сброс ядра работает надёжнее ESP.restart() после UART-прошивки
+  ESP.restart();
 }
 
 
@@ -564,11 +565,29 @@ void handleSensorsPage() {
     ".card{border:1px solid #333;padding:10px;margin-bottom:10px;border-radius:6px;background:#1a1a1a}"
     "input,select{padding:4px;margin:2px}button{padding:7px 12px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer}"
     ".scan{background:#1565c0;margin-right:6px}.del{background:#c62828}a{color:#64b5f6}</style></head><body>"
+    "<a href='/' style='margin-left:10px'>На главную</a><br>"
     "<h2>Управление датчиками</h2>"
     "<form method='POST' action='/scan_sensors' style='margin-bottom:14px'>"
     "<button class='scan' type='submit' name='bus' value='ow'>Сканировать 1-Wire</button>"
     "<button class='scan' type='submit' name='bus' value='i2c'>Сканировать I2C</button>"
-    "<a href='/' style='margin-left:10px'>На главную</a></form>"));
+    "</form>"));
+
+  String ignStr = "";
+  for (int i = 0; i < 8; i++) {
+    if (cfg.i2cIgnoreAddrs[i] != 0) {
+      if (ignStr.length() > 0) ignStr += ", ";
+      ignStr += "0x";
+      if (cfg.i2cIgnoreAddrs[i] < 0x10) ignStr += "0";
+      ignStr += String(cfg.i2cIgnoreAddrs[i], HEX);
+    }
+  }
+  ignStr.toUpperCase();
+  ignStr.replace("0X", "0x");
+
+  server.sendContent("<div class='card'><form method='POST' action='/save_i2c_ignore'>"
+    "<b>Исключения сканирования I2C</b> (HEX через запятую, например: <code>0x50, 0x57</code>; 0x27 и 0x68 скрыты всегда):<br>"
+    "<input name='ign' style='width:70%' value='" + ignStr + "'> "
+    "<button type='submit'>Сохранить список</button></form></div>");
 
   // 1. DHT22
   server.sendContent(F("<h3>Датчик DHT22 (GPIO2)</h3><div class='card'><form method='POST' action='/save_sensor'>"
@@ -631,32 +650,101 @@ void handleSensorsPage() {
   server.sendContent(F("<br><a href='/'>На главную</a></body></html>"));
 }
 
+void handleSaveI2cIgnore() {
+  if (!checkWebAuth()) return;
+  memset(cfg.i2cIgnoreAddrs, 0, sizeof(cfg.i2cIgnoreAddrs));
+  if (server.hasArg("ign")) {
+    String s = server.arg("ign");
+    int slot = 0, pos = 0;
+    while (pos < (int)s.length() && slot < 8) {
+      int comma = s.indexOf(',', pos);
+      String tok = (comma == -1) ? s.substring(pos) : s.substring(pos, comma);
+      tok.trim();
+      if (tok.length() > 0) {
+        long val = strtol(tok.c_str(), NULL, 0); // Понимает и "0x50", и десятичные числа
+        if (val > 0 && val < 127) cfg.i2cIgnoreAddrs[slot++] = (uint8_t)val;
+      }
+      if (comma == -1) break;
+      pos = comma + 1;
+    }
+  }
+  saveConfig();
+  server.send(200, "text/html", "<meta charset='utf-8'>Список исключений I2C сохранён! <a href='/sensors'>Назад к датчикам</a>");
+}
+
 void handleScanSensors() {
   if (!checkWebAuth()) return;
   String bus = server.arg("bus");
   uint8_t found = 0;
+
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+  server.sendContent(F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<style>body{font-family:sans-serif;max-width:650px;margin:auto;padding:15px;background:#121212;color:#eee}"
+    "table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #333;padding:8px;text-align:left}"
+    "a.btn{display:inline-block;padding:8px 14px;background:#1976d2;color:#fff;text-decoration:none;border-radius:4px}</style>"
+    "</head><body><h2>Результат сканирования</h2>"));
+
   if (bus == "ow") {
+    server.sendContent(F("<table><thead><tr><th>Слот</th><th>ID датчика (ROM)</th><th>Температура</th><th>Статус</th></tr></thead><tbody>"));
     owSensorsBus.begin();
-    uint8_t addr[8];
-    oneWire.reset_search();
-    while (oneWire.search(addr)) {
-      if (OneWire::crc8(addr, 7) != addr[7]) continue;
-      int slot = -1;
-      for (int i = 0; i < MAX_OW_SENSORS; i++) if (memcmp(cfg.owSensors[i].addr, addr, 8) == 0) slot = i;
-      if (slot == -1) {
+    delay(20);
+    uint64_t addrStorage = 0;
+    uint8_t *addr = (uint8_t*)&addrStorage;
+
+    for (uint8_t attempt = 0; attempt < 3 && found == 0; attempt++) {
+      oneWire.reset_search();
+      delay(10);
+      while (oneWire.search(addr)) {
+        yield();
+        if (OneWire::crc8(addr, 7) != *(addr + 7)) continue;
+        bool isNew = false;
+        int slot = -1;
         for (int i = 0; i < MAX_OW_SENSORS; i++) {
-          if (cfg.owSensors[i].addr[0] == 0) {
-            slot = i; memcpy(cfg.owSensors[i].addr, addr, 8);
-            cfg.owSensors[i].fmt.enabled = true; cfg.owSensors[i].fmt.showOnMain = true;
-            break;
+          if (memcmp(cfg.owSensors[i].addr, addr, 8) == 0) slot = i;
+        }
+        if (slot == -1) {
+          for (int i = 0; i < MAX_OW_SENSORS; i++) {
+            if (cfg.owSensors[i].addr[0] == 0) {
+              slot = i;
+              memcpy(cfg.owSensors[i].addr, addr, 8);
+              cfg.owSensors[i].fmt.enabled = true;
+              cfg.owSensors[i].fmt.showOnMain = true;
+              isNew = true;
+              break;
+            }
           }
         }
+        String idStr = "";
+        for (int b = 0; b < 8; b++) {
+          uint8_t v = *(addr + b);
+          if (v < 0x10) idStr += "0";
+          idStr += String(v, HEX);
+        }
+        idStr.toUpperCase();
+
+        String tempStr = "—";
+        if (slot != -1) {
+          owSensorsBus.requestTemperaturesByAddress(addr);
+          delay(750);
+          owValues[slot] = owSensorsBus.getTempC(addr);
+          tempStr = isnan(owValues[slot]) ? "ERR" : (String(owValues[slot], 2) + " °C");
+        }
+        String row = "<tr><td>" + (slot != -1 ? ("#" + String(slot + 1)) : "Нет мест") + "</td>"
+                     "<td><code>" + idStr + "</code></td>"
+                     "<td><b>" + tempStr + "</b></td>"
+                     "<td>" + (isNew ? "Добавлен" : "Уже в списке") + "</td></tr>";
+        server.sendContent(row);
+        found++;
       }
-      if (slot != -1) found++;
     }
+    server.sendContent(F("</tbody></table>"));
   } else if (bus == "i2c") {
+    const char* tNames[] = {"None", "BMP180", "BME280", "BMP280", "AHT20", "SHT41", "BH1750", "PCF8574"};
+    server.sendContent(F("<table><thead><tr><th>Слот</th><th>Адрес</th><th>Определён как</th><th>Статус</th></tr></thead><tbody>"));
     for (uint8_t addr = 1; addr < 127; addr++) {
-      if (addr == LCD_ADDR || addr == RTC_ADDR || (addr >= 0x50 && addr <= 0x57)) continue;
+      yield();
+      if (isI2cAddressIgnored(addr)) continue;
       Wire.beginTransmission(addr);
       if (Wire.endTransmission() == 0) {
         I2cDevType det = I2C_NONE;
@@ -666,24 +754,43 @@ void handleScanSensors() {
         else if (addr == 0x76 || addr == 0x77) det = I2C_BMP280;
         else if ((addr >= 0x20 && addr <= 0x27) || (addr >= 0x39 && addr <= 0x3F)) det = I2C_PCF8574;
 
+        bool isNew = false;
         int slot = -1;
         for (int i = 0; i < MAX_I2C_DEVICES; i++) if (cfg.i2cDevices[i].addr == addr) slot = i;
         if (slot == -1) {
           for (int i = 0; i < MAX_I2C_DEVICES; i++) {
             if (cfg.i2cDevices[i].addr == 0) {
-              slot = i; cfg.i2cDevices[i].addr = addr; cfg.i2cDevices[i].type = det;
-              cfg.i2cDevices[i].fmt.enabled = true; cfg.i2cDevices[i].fmt.showOnMain = true;
+              slot = i;
+              cfg.i2cDevices[i].addr = addr;
+              cfg.i2cDevices[i].type = det;
+              cfg.i2cDevices[i].fmt.enabled = true;
+              cfg.i2cDevices[i].fmt.showOnMain = true;
+              isNew = true;
               break;
             }
           }
         }
-        if (slot != -1) found++;
+        String hexStr = "0x";
+        if (addr < 0x10) hexStr += "0";
+        String hVal = String(addr, HEX);
+        hVal.toUpperCase();
+        hexStr += hVal;
+
+        uint8_t curType = (slot != -1) ? cfg.i2cDevices[slot].type : det;
+        String row = "<tr><td>" + (slot != -1 ? ("#" + String(slot + 1)) : "Нет мест") + "</td>"
+                     "<td><code>" + hexStr + "</code></td>"
+                     "<td><b>" + String(tNames[curType]) + "</b></td>"
+                     "<td>" + (isNew ? "Добавлен" : "Уже в списке") + "</td></tr>";
+        server.sendContent(row);
+        found++;
       }
     }
+    server.sendContent(F("</tbody></table>"));
   }
+
   saveConfig();
   initPeripherals();
-  server.send(200, "text/html", "<meta charset='utf-8'>Найдено устройств: " + String(found) + ". <a href='/sensors'>Вернуться к датчикам</a>");
+  server.sendContent("<p>Всего найдено: <b>" + String(found) + "</b></p><a class='btn' href='/sensors'>Вернуться к настройке датчиков</a></body></html>");
 }
 
 void handleSaveSensor() {
@@ -724,7 +831,7 @@ void handleSaveSensor() {
     }
   saveConfig();
   initPeripherals();
-  server.send(200, "text/html", "Настройки датчика сохранены! Назад к датчикам | На главную");
+  server.send(200, "text/html", "<meta charset='utf-8'>Настройки датчика сохранены! <a href='/sensors'>Назад к датчикам</a> | <a href='/'>На главную</a>");
 }
 
 void initWebServer() {
@@ -745,5 +852,6 @@ server.on("/reboot", HTTP_POST, handleReboot);
 server.on("/sensors", handleSensorsPage);
 server.on("/scan_sensors", HTTP_POST, handleScanSensors);
 server.on("/save_sensor", HTTP_POST, handleSaveSensor);
+server.on("/save_i2c_ignore", HTTP_POST, handleSaveI2cIgnore);
 server.begin();
 }

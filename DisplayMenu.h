@@ -707,8 +707,7 @@ void menuI2C() {
 
       for (uint8_t addr = 1; addr < 127; addr++) {
         yield();
-        if (addr == LCD_ADDR || addr == RTC_ADDR) continue;
-        if (addr >= 0x50 && addr <= 0x57) continue;
+        if (isI2cAddressIgnored(addr)) continue;
 
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {

@@ -101,6 +101,8 @@ void setup() {
   initPeripherals();
 
   lcd.begin();
+  Wire.begin(pinSDA, pinSCL);
+  Wire.setClock(50000);  
   lcd.createChar(7, degreeChar);
   lcd.home();
   lcd.clear();
