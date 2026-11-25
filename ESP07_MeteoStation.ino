@@ -131,6 +131,7 @@ void loop() {
   // 1. Обслуживание веб-сервера и приёмника 433 МГц в реальном времени
   server.handleClient();
   checkRfReceiver();
+  processPendingWebhook();
   updateBacklight();
 
   unsigned long now = millis();

@@ -123,6 +123,28 @@ struct AutoRule {
   bool invertElse;      // true = инвертировать выход, если условие НЕ выполняется
 };
 
+#define MAX_RF_LOG 5
+#define MAX_RF_RULES 4
+
+struct RfLogEntry {
+  unsigned long code;
+  uint16_t bitLen;
+  uint8_t proto;
+  char timeStr[10]; // "HH:MM:SS"
+};
+
+RfLogEntry rfLog[MAX_RF_LOG];
+
+struct RfActionRule {
+  bool enabled;
+  unsigned long code;      // Код сигнала (например, 1234567)
+  char label[12];          // Имя датчика (например, "Дверь")
+  uint8_t pcfIdx;          // Индекс PCF8574 (255 = не управлять реле)
+  uint8_t pcfBit;          // Пин 0..7
+  uint8_t relayAction;     // 0 = нет, 1 = ВКЛ, 2 = ВЫКЛ, 3 = ПЕРЕКЛЮЧИТЬ
+  bool sendWebhook;        // Отправлять ли HTTP GET на внешний URL
+};
+
 struct SystemConfig {
   uint8_t magic;
   uint8_t backlightMode;     // 0 = ВКЛ, 1 = ВЫКЛ, 2 = Таймер
@@ -137,6 +159,8 @@ struct SystemConfig {
   I2cDeviceCfg i2cDevices[MAX_I2C_DEVICES];
   AutoRule rules[MAX_RULES];
   uint8_t i2cIgnoreAddrs[8]; // Исключаемые I2C-адреса при сканировании (0 = пустой слот)
+  char rfWebhookUrl[96];               // Шаблон ссылки, например: http://192.168.1%
+  RfActionRule rfRules[MAX_RF_RULES];  // Реакции на конкретные коды
 } cfg;
 
 // ================= РАБОЧИЕ ДАННЫЕ =================
@@ -170,6 +194,9 @@ void setDefaultConfig() {
   cfg.servoAngle = 90;
   cfg.powerSensePcfIdx = 0;
   cfg.powerSensePcfBit = 7;
+
+  cfg.rfWebhookUrl[0] = '\0';
+  memset(cfg.rfRules, 0, sizeof(cfg.rfRules));
 
   // Сеть по умолчанию: Точка доступа
   cfg.net.wifiMode = 2; // AP
