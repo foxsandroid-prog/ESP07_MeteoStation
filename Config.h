@@ -15,14 +15,13 @@
 // Пины ESP-07
 #define pinSDA   4
 #define pinSCL   5
-#define pinCLK   12  // CLK энкодера на GPIO12 (подтяжка 10 кОм к GND) (был на GPIO2 с неподходящей поддяжкой)
-#define pinDT    13  // DT энкодера на GPIO15 (подтяжка 10 кОм к GND),
-// меняю на 13 пин и подтяжку к 3.3В и общий к gnd
-#define pinSW    0   // Кнопка энкодера (подтяжка 10к к +3.3В, замыкает на GND)
-#define pinOW    14  // 1-Wire (DS18B20)
-#define pinDHT   2   // Single-Wire (DHT22), из-за энкодера перенесён на GPIO2 (подтяжка 4.7 кОм к +3.3 В) (был на 12)
-#define pinRF    15  // Приемник SRX887, перенес на 15 с 13, что бы энкодер подключить
-#define pinServo 16  // Сервопривод
+#define pinCLK   16  // CLK энкодера на GPIO12, подтяжка 10 кОм к +3.3В 
+#define pinDT    13  // DT энкодера на GPIO13, подтяжка 10 кОм к +3.3В
+#define pinSW    0   // Кнопка энкодера, подтяжка 10кОм к +3.3В, замыкает на GND
+#define pinOW    14  // 1-Wire DS18B20
+#define pinDHT   2   // Single-Wire DHT22, из-за энкодера перенесён на GPIO2 (подтяжка 4.7 кОм к +3.3 В) (был на 12)
+#define pinRF    12  // Приемник SRX887, перенес на 15 с 13, что бы энкодер подключить, на 15 не работает, пробую на 12
+#define pinServo 15  // Сервопривод, перенесен на 15 с 16
 #define pinADC   A0  // Контроль АКБ 18650
 
 #define MAX_OW_SENSORS  16
