@@ -129,10 +129,11 @@ struct RfLogEntry {
   unsigned long code;
   uint16_t bitLen;
   uint8_t proto;
-  char timeStr[10]; // "HH:MM:SS"
+  char timeStr[12]; // "HH:MM:SS"
 };
 
 RfLogEntry rfLog[MAX_RF_LOG];
+bool hasUnreadRf = false;
 
 struct RfActionRule {
   bool enabled;
@@ -158,7 +159,7 @@ struct SystemConfig {
   I2cDeviceCfg i2cDevices[MAX_I2C_DEVICES];
   AutoRule rules[MAX_RULES];
   uint8_t i2cIgnoreAddrs[8]; // Исключаемые I2C-адреса при сканировании (0 = пустой слот)
-  char rfWebhookUrl[96];               // Шаблон ссылки, например: http://192.168.1%
+  char rfWebhookUrl[100];               // Шаблон ссылки, например: http://192.168.1%
   RfActionRule rfRules[MAX_RF_RULES];  // Реакции на конкретные коды
 } cfg;
 

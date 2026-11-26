@@ -119,6 +119,7 @@ void checkRfReceiver() {
   rfLog[0].proto = proto;
   String tNow = getFormattedTime(); // Берем текущее время "HH:MM:SS"
   strlcpy(rfLog[0].timeStr, tNow.c_str(), sizeof(rfLog[0].timeStr));
+  hasUnreadRf = true;
 
   // 2. Проверяем правила реакции на этот код
   String matchedName = "RF_" + String(code);

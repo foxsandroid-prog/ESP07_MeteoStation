@@ -210,7 +210,13 @@ void drawMainScreen() {
 
   // Формируем верхнюю строку ровно на 20 символов: "12:34 U:02:15 4.1V⚡📶"
   // 1. Всегда формируем и закрепляем строку 0 (верхняя системная строка)
-  String leftPart = getFormattedTime().substring(0, 5) + " U:" + formatUptimeShort();
+  static bool screenAliveTick = false;
+  screenAliveTick = !screenAliveTick;
+  String timeShort = getFormattedTime().substring(0, 5);
+  if (screenAliveTick) timeShort.replace(":", "%"); // Мигает "12:34" <-> "12%34" при каждой перерисовке
+  char rfMark = hasUnreadRf ? '!' : ' ';           // "!" между временем и U:, если есть непросмотренный RF-сигнал
+  String leftPart = timeShort + String(rfMark) + "U:" + formatUptimeShort();
+
   String rightPart = String(batteryVoltage, 1) + "V\x01\x02";
   int spaces = (int)LCD_COLS - (int)leftPart.length() - (int)rightPart.length();
   String sysLine = leftPart;
@@ -864,23 +870,50 @@ void menuSystem() {
   }
 }
 
+void menuRfLog() {
+  hasUnreadRf = false; // Сбрасываем индикатор "!" на главном экране
+  uint8_t pos = 0;
+  while (true) {
+    String items[MAX_RF_LOG + 1];
+    for (int i = 0; i < MAX_RF_LOG; i++) {
+      if (rfLog[i].code == 0) {
+        items[i] = String(i + 1) + ". --- empty ---";
+      } else {
+        // Формат: "1.16:45:10 1234567" (ровно помещается в строку 20 символов)
+        items[i] = String(i + 1) + "." + String(rfLog[i].timeStr) + " " + String(rfLog[i].code);
+      }
+    }
+    items[MAX_RF_LOG] = "< Back";
+    pos = lcd.selectVal("RF 433 Log (Last 5)", items, MAX_RF_LOG + 1, false, pos);
+    if (pos == MAX_RF_LOG) break;
+
+    // При нажатии на конкретный сигнал показываем полную информацию (протокол и битность)
+    if (rfLog[pos].code != 0) {
+      String info = "P" + String(rfLog[pos].proto) + " " + String(rfLog[pos].bitLen) + "b #" + String(rfLog[pos].code);
+      const char* ok[1] = {"< Back"};
+      lcd.selectVal(info, ok, 1, false, 0);
+    }
+  }
+}
+
 void openMainMenu() {
   pollPhase = POLL_IDLE;
   uint8_t pos = 0;
-  const char* mainMenuItems[7] = {
+  const char* mainMenuItems[8] = {
     "1. 1-Wire (DS18B20)",
     "2. DHT22 Sensor",
     "3. I2C Devices",
     "4. Network & Wi-Fi",
     "5. Automation Rules",
     "6. System & LCD",
+    "7. RF 433 Log",
     "< Exit to Monitor"
   };
   while (true) {
     registerUserActivity();
     server.handleClient();
-    pos = lcd.selectVal("MAIN MENU", mainMenuItems, 7, false, pos);
-    if (pos == 6) break;
+    pos = lcd.selectVal("MAIN MENU", mainMenuItems, 8, false, pos);
+    if (pos == 7) break;
     switch (pos) {
       case 0: menuOneWire(); break;
       case 1: editDisplayFormat(cfg.dhtSensors[0].fmt, 2, "Temp", "Hum", ""); break;
@@ -888,6 +921,7 @@ void openMainMenu() {
       case 3: menuNetwork(); break;
       case 4: menuRules(); break;
       case 5: menuSystem(); break;
+      case 6: menuRfLog(); break;
     }
   }
   lcd.clear();
