@@ -307,7 +307,7 @@ void handleSettings() {
   html += "Период опроса (сек):<input type='number' name='poll' value='" + String(cfg.pollIntervalSec) + "'>";
   html += "Угол сервопривода (0..180):<input type='number' name='servo' min='0' max='180' value='" + String(cfg.servoAngle) + "'>";
   html += "Web Логин:<input name='wuser' maxlength='16' value='" + String(cfg.net.webUser) + "'>";
-  html += "Web Пароль:<input name='webpass' maxlength='16' value='" + String(cfg.net.webPass) + "'>";
+  html += "Web Пароль:<input name='webpass' type='password' maxlength='16' value='" + String(cfg.net.webPass) + "'>";
 
   html += "24V контроль PCF слот (0=выкл, 1..6):<input type='number' name='psdev' min='0' max='6' value='" + String(cfg.powerSensePcfIdx == 255 ? 0 : cfg.powerSensePcfIdx + 1) + "'>";
   html += "24V контроль PCF пин (0..7):<input type='number' name='psbit' min='0' max='7' value='" + String(cfg.powerSensePcfBit) + "'>";
@@ -403,7 +403,7 @@ void handleNetSettings() {
   s += "<option value='1'" + String(cfg.net.wifiMode == 1 ? " selected" : "") + ">Клиент (STA)</option>";
   s += "<option value='2'" + String(cfg.net.wifiMode == 2 ? " selected" : "") + ">Точка доступа (AP)</option></select>";
   s += "SSID (до 16 симв):<input name='ssid' maxlength='16' value='" + String(cfg.net.ssid) + "'>";
-  s += "Пароль Wi-Fi (до 16):<input name='wpass' maxlength='16' value='" + String(cfg.net.password) + "'>";
+  s += "Пароль Wi-Fi (до 16):<input name='wpass' type='password' maxlength='16' value='" + String(cfg.net.password) + "'>";
   s += "IP режим:<select name='dhcp'><option value='0'" + String(!cfg.net.useStaticIp ? " selected" : "") + ">DHCP</option>";
   s += "<option value='1'" + String(cfg.net.useStaticIp ? " selected" : "") + ">Статический IP</option></select>";
   server.sendContent(s);
@@ -419,7 +419,7 @@ void handleNetSettings() {
   snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", cfg.net.dns[0], cfg.net.dns[1], cfg.net.dns[2], cfg.net.dns[3]);
   s += "DNS:<input name='dns' value='" + String(ipBuf) + "'>";
   s += "Web Логин:<input name='wuser' maxlength='16' value='" + String(cfg.net.webUser) + "'>";
-  s += "Web Пароль:<input name='webpass' maxlength='16' value='" + String(cfg.net.webPass) + "'>";
+  s += "Web Пароль:<input name='webpass' type='password' maxlength='16' value='" + String(cfg.net.webPass) + "'>";
   s += "<button type='submit'>Сохранить сеть</button></form><br><a href='/'>На главную</a></body></html>";
   server.sendContent(s);
 }
@@ -837,43 +837,43 @@ void handleSaveSensor() {
 
 void handleRfPage() {
   if (!checkWebAuth()) return;
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
-
-  server.sendContent(F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Радио 433 МГц</title>"
+  String h = F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Радио 433 МГц</title>"
     "<style>body{font-family:sans-serif;max-width:680px;margin:auto;padding:12px;background:#121212;color:#eee}"
     "table{width:100%;border-collapse:collapse;margin-bottom:14px}td,th{border:1px solid #333;padding:6px;text-align:left}"
     ".card{border:1px solid #333;padding:10px;margin-bottom:10px;border-radius:6px;background:#1a1a1a}"
     "input,select{padding:5px;margin:3px}button{padding:9px 15px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer}"
     "a{color:#64b5f6}</style></head><body><h2>Радиоприёмник 433 МГц (SRX882)</h2>"
     "<h3>Последние 5 принятых сигналов</h3>"
-    "<table><thead><tr><th>#</th><th>Время</th><th>Код сигнала</th><th>Бит / Протокол</th></tr></thead><tbody>"));
+    "<table><thead><tr><th>#</th><th>Время</th><th>Код сигнала</th><th>Бит / Протокол</th></tr></thead><tbody>");
 
   for (int i = 0; i < MAX_RF_LOG; i++) {
-    String row = "<tr><td>" + String(i + 1) + "</td>";
+    h += "<tr><td>" + String(i + 1) + "</td>";
     if (rfLog[i].code == 0) {
-      row += "<td colspan='3' style='color:#777'>— пусто —</td></tr>";
+      h += "<td colspan='3' style='color:#777'>— пусто —</td></tr>";
     } else {
-      row += "<td>" + String(rfLog[i].timeStr) + "</td>"
-             "<td><b><code>" + String(rfLog[i].code) + "</code></b></td>"
-             "<td>" + String(rfLog[i].bitLen) + " bit (P" + String(rfLog[i].proto) + ")</td></tr>";
+      h += "<td>" + String(rfLog[i].timeStr) + "</td>"
+           "<td><b><code>" + String(rfLog[i].code) + "</code></b></td>"
+           "<td>" + String(rfLog[i].bitLen) + " bit (P" + String(rfLog[i].proto) + ")</td></tr>";
     }
-    server.sendContent(row);
   }
-  server.sendContent(F("</tbody></table>"));
+  h += F("</tbody></table>");
 
-  String h = "<form method='POST' action='/save_rf'><div class='card'><b>Внешний URL (HTTP GET Webhook):</b><br>"
-             "<small>Подстановки: <code>%CODE%</code> — код сигнала, <code>%NAME%</code> — имя датчика, <code>%TIME%</code> — время</small><br>"
-             "<input name='whurl' style='width:96%' maxlength='95' placeholder='http://192.168.1%' value='" + String(cfg.rfWebhookUrl) + "'></div>";
-  h += "<h3>Реакции на коды</h3>";
-  server.sendContent(h);
+  String safeUrl = String(cfg.rfWebhookUrl);
+  safeUrl.replace("'", "&#39;");
+
+  h += "<form method='POST' action='/save_rf'><div class='card'><b>Внешний URL (HTTP GET Webhook):</b><br>"
+       "<small>Подстановки: <code>%CODE%</code> — код сигнала, <code>%NAME%</code> — имя датчика, <code>%TIME%</code> — время</small><br>"
+       "<input name='whurl' style='width:96%' maxlength='99' placeholder='http://192.168.1%' value='" + safeUrl + "'></div>"
+       "<h3>Реакции на коды</h3>";
 
   for (int r = 0; r < MAX_RF_RULES; r++) {
     RfActionRule &rl = cfg.rfRules[r];
-    h = "<div class='card'><b>Правило #" + String(r + 1) + "</b> ";
-    h += "<label><input type='checkbox' name='en" + String(r) + "'" + String(rl.enabled ? " checked" : "") + "> Активно</label><br>";
-    h += "Код RF: <input type='number' name='cd" + String(r) + "' style='width:120px' value='" + String(rl.code) + "'> ";
-    h += "Имя: <input name='nm" + String(r) + "' size='10' maxlength='11' value='" + String(rl.label) + "'><br>";
+    String safeLbl = String(rl.label);
+    safeLbl.replace("'", "&#39;");
+    h += "<div class='card'><b>Правило #" + String(r + 1) + "</b> ";
+    h += "<label><input type='checkbox' name='en" + String(r) + "' value='1'" + String(rl.enabled ? " checked" : "") + "> Активно</label><br>";
+    h += "Код RF: <input type='number' min='0' name='cd" + String(r) + "' style='width:120px' value='" + String(rl.code) + "'> ";
+    h += "Имя: <input name='nm" + String(r) + "' size='10' maxlength='11' value='" + safeLbl + "'><br>";
     h += "PCF слот (0=нет, 1..8): <input type='number' min='0' max='8' name='ps" + String(r) + "' style='width:48px' value='" + String(rl.pcfIdx == 255 ? 0 : rl.pcfIdx + 1) + "'> ";
     h += "Пин (0..7): <input type='number' min='0' max='7' name='pb" + String(r) + "' style='width:45px' value='" + String(rl.pcfBit) + "'> ";
     h += "Реле: <select name='ra" + String(r) + "'>";
@@ -881,28 +881,42 @@ void handleRfPage() {
     h += "<option value='1'" + String(rl.relayAction == 1 ? " selected" : "") + ">Включить</option>";
     h += "<option value='2'" + String(rl.relayAction == 2 ? " selected" : "") + ">Выключить</option>";
     h += "<option value='3'" + String(rl.relayAction == 3 ? " selected" : "") + ">Переключить</option></select><br>";
-    h += "<label><input type='checkbox' name='wh" + String(r) + "'" + String(rl.sendWebhook ? " checked" : "") + "> Отправлять запрос на внешний URL</label></div>";
-    server.sendContent(h);
+    h += "<label><input type='checkbox' name='wh" + String(r) + "' value='1'" + String(rl.sendWebhook ? " checked" : "") + "> Отправлять запрос на внешний URL</label></div>";
   }
 
-  server.sendContent(F("<button type='submit'>Сохранить настройки RF</button></form><br><a href='/'>На главную</a></body></html>"));
+  h += F("<button type='submit'>Сохранить настройки RF</button></form><br><a href='/'>На главную</a></body></html>");
+  server.send(200, "text/html", h);
 }
 
 void handleSaveRf() {
   if (!checkWebAuth()) return;
-  if (server.hasArg("whurl")) strlcpy(cfg.rfWebhookUrl, server.arg("whurl").c_str(), sizeof(cfg.rfWebhookUrl));
+  if (server.hasArg("whurl")) {
+    strlcpy(cfg.rfWebhookUrl, server.arg("whurl").c_str(), sizeof(cfg.rfWebhookUrl));
+  }
   for (int r = 0; r < MAX_RF_RULES; r++) {
-    cfg.rfRules[r].enabled = server.hasArg("en" + String(r));
-    cfg.rfRules[r].code = server.arg("cd" + String(r)).toInt();
-    strlcpy(cfg.rfRules[r].label, server.arg("nm" + String(r)).c_str(), sizeof(cfg.rfRules[r].label));
-    int ps = server.arg("ps" + String(r)).toInt();
-    cfg.rfRules[r].pcfIdx = (ps <= 0) ? 255 : constrain(ps - 1, 0, MAX_I2C_DEVICES - 1);
-    cfg.rfRules[r].pcfBit = constrain(server.arg("pb" + String(r)).toInt(), 0, 7);
-    cfg.rfRules[r].relayAction = constrain(server.arg("ra" + String(r)).toInt(), 0, 3);
-    cfg.rfRules[r].sendWebhook = server.hasArg("wh" + String(r));
+    String idx = String(r);
+    cfg.rfRules[r].enabled = server.hasArg("en" + idx);
+    if (server.hasArg("cd" + idx)) {
+      cfg.rfRules[r].code = strtoul(server.arg("cd" + idx).c_str(), NULL, 10);
+    }
+    if (server.hasArg("nm" + idx)) {
+      strlcpy(cfg.rfRules[r].label, server.arg("nm" + idx).c_str(), sizeof(cfg.rfRules[r].label));
+    }
+    if (server.hasArg("ps" + idx)) {
+      int ps = server.arg("ps" + idx).toInt();
+      cfg.rfRules[r].pcfIdx = (ps <= 0) ? 255 : constrain(ps - 1, 0, MAX_I2C_DEVICES - 1);
+    }
+    if (server.hasArg("pb" + idx)) {
+      cfg.rfRules[r].pcfBit = constrain(server.arg("pb" + idx).toInt(), 0, 7);
+    }
+    if (server.hasArg("ra" + idx)) {
+      cfg.rfRules[r].relayAction = constrain(server.arg("ra" + idx).toInt(), 0, 3);
+    }
+    cfg.rfRules[r].sendWebhook = server.hasArg("wh" + idx);
   }
   saveConfig();
-  server.send(200, "text/html", "<meta charset='utf-8'>Настройки 433 МГц сохранены! <a href='/rf'>Назад</a> | <a href='/'>На главную</a>");
+  server.sendHeader("Location", "/rf");
+  server.send(303, "text/plain", "Saved");
 }
 
 

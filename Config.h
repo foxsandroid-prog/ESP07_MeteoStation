@@ -28,7 +28,7 @@
 #define MAX_DHT_SENSORS 2
 #define MAX_I2C_DEVICES 8
 #define MAX_RULES 8
-#define EEPROM_MAGIC    0x0F
+#define EEPROM_MAGIC    0x1F
 
 // ================= СТРУКТУРЫ НАСТРОЕК =================
 struct DisplayFormat {
@@ -197,6 +197,8 @@ void setDefaultConfig() {
 
   cfg.rfWebhookUrl[0] = '\0';
   memset(cfg.rfRules, 0, sizeof(cfg.rfRules));
+
+  for (int i = 0; i < MAX_RF_RULES; i++) cfg.rfRules[i].pcfIdx = 255;
 
   // Сеть по умолчанию: Точка доступа
   cfg.net.wifiMode = 2; // AP
